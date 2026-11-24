@@ -1,0 +1,20 @@
+{% extends 'calificaciones/base.html' %}
+
+{% block title %}Historial DDJJ · NUAM{% endblock %}
+
+{% block content %}
+  <h1 class="h4 mb-1">Buscador histórico de Declaraciones Juradas (DDJJ)</h1>
+  <p class="text-secondary">
+    Módulo de consulta histórica. Disponible para todos los roles de la plataforma.
+  </p>
+
+  <div class="card">
+    <div class="card-body">
+      <p class="mb-3">
+        El buscador histórico se habilitará en un próximo paso, reutilizando los
+        filtros del mantenedor y el acceso de solo lectura para Auditor / Cumplimiento.
+      </p>
+      <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary btn-sm">Volver al mantenedor</a>
+    </div>
+  </div>
+{% endblock %}

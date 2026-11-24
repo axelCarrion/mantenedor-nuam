@@ -21,6 +21,13 @@ OCHO_DECIMALES = Decimal('0.00000001')
 #: Precisión de la suma de control de factores (8 decimales).
 UNIDAD_FACTOR = Decimal('1.00000000')
 
+#: Etiquetas de presentación de la matriz de factores, en orden.
+ETIQUETAS_FACTORES = (
+    [(f'factor_{numero:02d}', f'Factor-{numero:02d}') for numero in range(8, 20)]
+    + [('factor_19b', 'Factor-19B')]
+    + [(f'factor_{numero:02d}', f'Factor-{numero:02d}') for numero in range(20, 39)]
+)
+
 
 def cuantizar(valor) -> Decimal:
     """Normaliza un valor a 8 decimales usando redondeo ``ROUND_HALF_UP``.
@@ -220,6 +227,22 @@ class Calificacion(models.Model):
             cuantizar(self.valor_historico) * cuantizar(self.factor_actualizacion)
         )
 
+    @property
+    def factores_para_mostrar(self) -> 'Factores':
+        """Factores asociados o una instancia vacía para grillas y reportes."""
+        try:
+            return self.factores
+        except Factores.DoesNotExist:
+            return Factores(calificacion=self)
+
+    @property
+    def factor_actualizacion_formateado(self) -> str:
+        return formatear(self.factor_actualizacion)
+
+    @property
+    def valor_historico_formateado(self) -> str:
+        return formatear(self.valor_historico)
+
 
 # ---------------------------------------------------------------------------
 # Factores
@@ -352,6 +375,14 @@ class Factores(models.Model):
             Decimal('0.00000000'),
         )
         return cuantizar(total)
+
+    @property
+    def valores_formateados(self) -> list[tuple[str, str]]:
+        """Pares (etiqueta, valor) con 8 decimales para grillas y PDFs."""
+        return [
+            (etiqueta, formatear(getattr(self, campo)))
+            for campo, etiqueta in ETIQUETAS_FACTORES
+        ]
 
     def clean_fields(self, exclude=None):
         # Cuantiza antes de las validaciones de dígitos decimales del campo.

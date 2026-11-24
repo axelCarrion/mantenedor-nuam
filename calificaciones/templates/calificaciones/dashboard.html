@@ -1,69 +1,251 @@
 {% extends 'calificaciones/base.html' %}
 
-{% block title %}Panel · Plataforma NUAM{% endblock %}
+{% block title %}Mantenedor · Calificaciones Tributarias NUAM{% endblock %}
 
 {% block content %}
-  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-end mb-3 gap-2">
     <div>
-      <h1 class="h3 mb-1">Panel de control</h1>
-      <p class="text-secondary mb-0">Mantenedor de Calificaciones Tributarias</p>
+      <h1 class="h4 mb-1">Mantenedor de Calificaciones Tributarias</h1>
+      <p class="text-secondary mb-0 small">
+        {{ total_calificaciones }} registros en total ·
+        {{ total_pendientes }} pendientes
+      </p>
     </div>
     <div class="d-flex gap-2">
-      {% if puede_escribir %}
-        <a class="btn btn-primary btn-sm" href="{% url 'calificaciones:calificacion_crear' %}">Nueva calificación</a>
-        <a class="btn btn-outline-primary btn-sm" href="{% url 'calificaciones:carga_masiva' %}">Carga masiva CSV</a>
-      {% endif %}
-      <a class="btn btn-outline-secondary btn-sm" href="{% url 'calificaciones:historial_ddjj' %}">Historial DDJJ</a>
-      {% if es_administrador %}
-        <a class="btn btn-outline-dark btn-sm" href="{% url 'calificaciones:auditoria' %}">Auditoría</a>
+      {% for nombre, descripcion in descripcion_roles %}
+        <span class="badge text-bg-secondary" title="{{ descripcion }}">{{ nombre }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-header fw-semibold">Panel de filtros de búsqueda</div>
+    <div class="card-body">
+      <form method="get" action="{% url 'calificaciones:dashboard' %}" class="row g-3 align-items-end">
+        <div class="col-12 col-sm-6 col-lg-2">
+          <label for="filtro-mercado" class="form-label small mb-1">Mercado</label>
+          <select id="filtro-mercado" name="mercado" class="form-select form-select-sm">
+            <option value="">Todos</option>
+            <option value="ACCIONES" {% if filtros.mercado == 'ACCIONES' %}selected{% endif %}>ACCIONES</option>
+            <option value="DEUDA" {% if filtros.mercado == 'DEUDA' %}selected{% endif %}>DEUDA</option>
+          </select>
+        </div>
+
+        <div class="col-12 col-sm-6 col-lg-2">
+          <label for="filtro-origen" class="form-label small mb-1">Origen</label>
+          <select id="filtro-origen" name="origen" class="form-select form-select-sm">
+            <option value="">Todos</option>
+            <option value="CORREDOR" {% if filtros.origen == 'CORREDOR' %}selected{% endif %}>CORREDOR</option>
+            <option value="SISTEMA" {% if filtros.origen == 'SISTEMA' %}selected{% endif %}>SISTEMA</option>
+          </select>
+        </div>
+
+        <div class="col-12 col-sm-6 col-lg-2">
+          <label for="filtro-periodo" class="form-label small mb-1">Periodo Comercial</label>
+          <select id="filtro-periodo" name="periodo" class="form-select form-select-sm">
+            <option value="">Todos</option>
+            {% for anio in anios %}
+              <option value="{{ anio }}" {% if filtros.periodo == anio|stringformat:'s' %}selected{% endif %}>{{ anio }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-12 col-sm-6 col-lg-3">
+          <div class="form-check mt-lg-4 pt-lg-2">
+            <input class="form-check-input" type="checkbox" value="on" id="filtro-pendiente"
+                   name="pendiente" {% if filtros.pendiente %}checked{% endif %}>
+            <label class="form-check-label small" for="filtro-pendiente">
+              Calificación Pendiente
+            </label>
+          </div>
+        </div>
+
+        <div class="col-12 col-lg-3 d-flex gap-2 justify-content-lg-end">
+          <button type="submit" class="btn btn-primary btn-sm px-4">BUSCAR</button>
+          <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary btn-sm px-3">LIMPIAR</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body p-0">
+      <div class="table-responsive" style="max-height: 60vh;">
+        <table class="table table-sm table-hover table-striped align-middle mb-0 text-nowrap">
+          <thead class="table-dark" style="position: sticky; top: 0; z-index: 2;">
+            <tr>
+              <th scope="col" class="text-center">Sel.</th>
+              <th scope="col">Ejercicio</th>
+              <th scope="col">Instrumento</th>
+              <th scope="col">Fecha Pago</th>
+              <th scope="col">Descripción</th>
+              <th scope="col">Secuencia Evento</th>
+              <th scope="col" class="text-end">Factor de Actualización</th>
+              {% for etiqueta in columnas_factores %}
+                <th scope="col" class="text-end">{{ etiqueta }}</th>
+              {% endfor %}
+              <th scope="col" class="text-center">Acogido ISFUT</th>
+              <th scope="col">Origen</th>
+              <th scope="col" class="text-center">Certificado</th>
+              {% if puede_escribir %}
+                <th scope="col" class="text-center">Acciones</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for fila in page_obj %}
+              <tr class="fila-calificacion" data-id="{{ fila.pk }}">
+                <td class="text-center">
+                  <input class="form-check-input fila-radio" type="radio" name="seleccion"
+                         value="{{ fila.pk }}" aria-label="Seleccionar {{ fila.instrumento }} {{ fila.ejercicio }}">
+                </td>
+                <td>{{ fila.ejercicio }}</td>
+                <td class="fw-semibold">{{ fila.instrumento }}</td>
+                <td>{{ fila.fecha_pago|date:'d-m-Y' }}</td>
+                <td>{{ fila.descripcion|default:'—' }}</td>
+                <td class="text-end">{{ fila.secuencia_evento }}</td>
+                <td class="text-end font-monospace">{{ fila.factor_actualizacion_formateado }}</td>
+                {% for etiqueta, valor in fila.factores_para_mostrar.valores_formateados %}
+                  <td class="text-end font-monospace">{{ valor }}</td>
+                {% endfor %}
+                <td class="text-center">
+                  {% if fila.acogido_isfut %}
+                    <span class="badge text-bg-success">S</span>
+                  {% else %}
+                    <span class="badge text-bg-light text-dark border">N</span>
+                  {% endif %}
+                </td>
+                <td>{{ fila.get_origen_display }}</td>
+                <td class="text-center">
+                  {% if fila.uri_documento %}
+                    <a class="btn btn-outline-danger btn-sm py-0 px-2"
+                       href="{% url 'calificaciones:calificacion_pdf' fila.pk %}"
+                       target="_blank" rel="noopener">Ver PDF</a>
+                  {% else %}
+                    <span class="text-secondary small">—</span>
+                  {% endif %}
+                </td>
+                {% if puede_escribir %}
+                  <td class="text-center">
+                    <div class="btn-group btn-group-sm">
+                      <a class="btn btn-outline-primary py-0 px-2"
+                         href="{% url 'calificaciones:calificacion_editar' fila.pk %}">Modificar</a>
+                      <a class="btn btn-outline-secondary py-0 px-2"
+                         href="{% url 'calificaciones:calificacion_copiar' fila.pk %}">Copiar</a>
+                      <a class="btn btn-outline-danger py-0 px-2"
+                         href="{% url 'calificaciones:calificacion_eliminar' fila.pk %}">Eliminar</a>
+                    </div>
+                  </td>
+                {% endif %}
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="{% if puede_escribir %}43{% else %}42{% endif %}" class="text-center text-secondary py-4">
+                  No hay registros.
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card-footer d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span class="small text-secondary">
+        {% if page_obj.paginator.count %}
+          Elementos mostrados {{ page_obj.start_index }} - {{ page_obj.end_index }} de {{ page_obj.paginator.count }}
+        {% else %}
+          No hay registros.
+        {% endif %}
+      </span>
+
+      {% if page_obj.paginator.num_pages > 1 %}
+        <nav aria-label="Paginación de calificaciones">
+          <ul class="pagination pagination-sm mb-0">
+            <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+              <a class="page-link"
+                 href="?{% if querystring %}{{ querystring }}&{% endif %}page={% if page_obj.has_previous %}{{ page_obj.previous_page_number }}{% else %}1{% endif %}">Anterior</a>
+            </li>
+            <li class="page-item disabled">
+              <span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+            </li>
+            <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+              <a class="page-link"
+                 href="?{% if querystring %}{{ querystring }}&{% endif %}page={% if page_obj.has_next %}{{ page_obj.next_page_number }}{% else %}{{ page_obj.paginator.num_pages }}{% endif %}">Siguiente</a>
+            </li>
+          </ul>
+        </nav>
       {% endif %}
     </div>
   </div>
 
-  <div class="row g-3 mb-4">
-    <div class="col-12 col-md-4">
-      <div class="card h-100">
-        <div class="card-body">
-          <p class="text-secondary text-uppercase small mb-1">Calificaciones</p>
-          <p class="display-6 mb-0">{{ total_calificaciones }}</p>
-        </div>
-      </div>
-    </div>
-    <div class="col-12 col-md-4">
-      <div class="card h-100">
-        <div class="card-body">
-          <p class="text-secondary text-uppercase small mb-1">Pendientes</p>
-          <p class="display-6 mb-0">{{ total_pendientes }}</p>
-        </div>
-      </div>
-    </div>
-    <div class="col-12 col-md-4">
-      <div class="card h-100">
-        <div class="card-body">
-          <p class="text-secondary text-uppercase small mb-1">Roles asignados</p>
-          {% for grupo in grupos_usuario %}
-            <span class="badge text-bg-secondary">{{ grupo }}</span>
-          {% empty %}
-            <span class="text-secondary small">Sin rol RBAC asignado</span>
-          {% endfor %}
-        </div>
-      </div>
-    </div>
+  <div class="alert alert-warning d-none" id="aviso-seleccion" role="alert">
+    Debe seleccionar una fila de la grilla para ejecutar esta acción.
   </div>
 
   <div class="card">
-    <div class="card-header fw-semibold">Permisos de su rol</div>
-    <ul class="list-group list-group-flush">
-      {% for nombre, descripcion in descripcion_roles %}
-        <li class="list-group-item">
-          <strong>{{ nombre }}</strong><br>
-          <span class="text-secondary small">{{ descripcion }}</span>
-        </li>
-      {% empty %}
-        <li class="list-group-item text-secondary">
-          Su usuario no tiene un rol RBAC asignado; contacte al Administrador TI.
-        </li>
-      {% endfor %}
-    </ul>
+    <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+      {% if puede_escribir %}
+        <a href="{% url 'calificaciones:calificacion_crear' %}" class="btn btn-success btn-sm px-3">INGRESAR</a>
+        <button type="button" class="btn btn-primary btn-sm px-3" data-accion="editar">MODIFICAR</button>
+        <button type="button" class="btn btn-danger btn-sm px-3" data-accion="eliminar">ELIMINAR</button>
+        <button type="button" class="btn btn-secondary btn-sm px-3" data-accion="copiar">COPIAR</button>
+        <a href="{% url 'calificaciones:carga_masiva' %}?tipo=factor" class="btn btn-outline-primary btn-sm px-3">CARGA X FACTOR</a>
+        <a href="{% url 'calificaciones:carga_masiva' %}?tipo=monto" class="btn btn-outline-primary btn-sm px-3">CARGA X MONTO</a>
+      {% else %}
+        <span class="text-secondary small">
+          Su rol es de solo lectura: puede consultar y descargar certificados.
+        </span>
+      {% endif %}
+    </div>
   </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      const aviso = document.getElementById('aviso-seleccion');
+      const plantillas = {
+        editar: "{% url 'calificaciones:calificacion_editar' 0 %}",
+        copiar: "{% url 'calificaciones:calificacion_copiar' 0 %}",
+        eliminar: "{% url 'calificaciones:calificacion_eliminar' 0 %}"
+      };
+
+      function seleccionada() {
+        return document.querySelector('input.fila-radio:checked');
+      }
+
+      document.querySelectorAll('tr.fila-calificacion').forEach(function (fila) {
+        fila.addEventListener('click', function (evento) {
+          if (evento.target.closest('a, button, input')) {
+            return;
+          }
+          const radio = fila.querySelector('input.fila-radio');
+          if (radio) {
+            radio.checked = true;
+            aviso.classList.add('d-none');
+          }
+        });
+      });
+
+      document.querySelectorAll('.fila-radio').forEach(function (radio) {
+        radio.addEventListener('change', function () {
+          aviso.classList.add('d-none');
+        });
+      });
+
+      document.querySelectorAll('[data-accion]').forEach(function (boton) {
+        boton.addEventListener('click', function () {
+          const radio = seleccionada();
+          if (!radio) {
+            aviso.classList.remove('d-none');
+            return;
+          }
+          aviso.classList.add('d-none');
+          const accion = boton.getAttribute('data-accion');
+          window.location.href = plantillas[accion].replace('/0/', '/' + radio.value + '/');
+        });
+      });
+    })();
+  </script>
 {% endblock %}

@@ -1,0 +1,44 @@
+{% extends 'calificaciones/base.html' %}
+
+{% block title %}Eliminar calificación · NUAM{% endblock %}
+
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-12 col-lg-7">
+      <div class="card border-danger">
+        <div class="card-header bg-danger-subtle text-danger-emphasis fw-semibold">
+          Confirmar eliminación
+        </div>
+        <div class="card-body">
+          <p class="mb-3">
+            ¿Confirma la eliminación de la siguiente calificación? Esta acción
+            queda registrada en la auditoría y no puede deshacerse.
+          </p>
+
+          <dl class="row small mb-4">
+            <dt class="col-4">Instrumento</dt>
+            <dd class="col-8">{{ calificacion.instrumento }}</dd>
+            <dt class="col-4">Ejercicio</dt>
+            <dd class="col-8">{{ calificacion.ejercicio }}</dd>
+            <dt class="col-4">Mercado</dt>
+            <dd class="col-8">{{ calificacion.get_mercado_display }}</dd>
+            <dt class="col-4">Fecha de pago</dt>
+            <dd class="col-8">{{ calificacion.fecha_pago|date:'d-m-Y' }}</dd>
+            <dt class="col-4">Secuencia evento</dt>
+            <dd class="col-8">{{ calificacion.secuencia_evento }}</dd>
+            <dt class="col-4">RUT cliente</dt>
+            <dd class="col-8">{{ calificacion.rut_cliente }}</dd>
+            <dt class="col-4">Descripción</dt>
+            <dd class="col-8">{{ calificacion.descripcion|default:'—' }}</dd>
+          </dl>
+
+          <form method="post" class="d-flex gap-2">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger px-4">ELIMINAR</button>
+            <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary px-4">CANCELAR</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends 'calificaciones/base.html' %}
+
+{% block title %}Carga masiva · NUAM{% endblock %}
+
+{% block content %}
+  <h1 class="h4 mb-1">Carga masiva CSV</h1>
+  <p class="text-secondary">Modalidad seleccionada: <strong>{{ tipo|upper }}</strong></p>
+
+  <div class="card">
+    <div class="card-body">
+      <p class="mb-2">
+        La carga masiva se implementará en el siguiente paso. Los archivos de
+        muestra están disponibles en <code>sample_csv/</code>:
+      </p>
+      <ul class="mb-3 small">
+        <li><code>carga_x_factor_valida.csv</code></li>
+        <li><code>carga_x_monto_valida.csv</code></li>
+        <li><code>carga_con_errores_validacion.csv</code></li>
+      </ul>
+      <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary btn-sm">Volver al mantenedor</a>
+    </div>
+  </div>
+{% endblock %}

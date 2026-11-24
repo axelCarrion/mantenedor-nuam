@@ -1,0 +1,214 @@
+{% extends 'calificaciones/base.html' %}
+
+{% block title %}{{ titulo }} · Calificaciones Tributarias NUAM{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div>
+      <h1 class="h4 mb-1">{{ titulo }}</h1>
+      {% if modo == 'copiar' %}
+        <p class="text-secondary small mb-0">
+          Copia de {{ calificacion.instrumento }} {{ calificacion.ejercicio }}.
+          La secuencia se sugiere incrementada y el certificado PDF no se copia.
+        </p>
+      {% elif modo == 'editar' %}
+        <p class="text-secondary small mb-0">
+          {{ calificacion.instrumento }} · {{ calificacion.ejercicio }} ·
+          evento {{ calificacion.secuencia_evento }}
+        </p>
+      {% else %}
+        <p class="text-secondary small mb-0">Registro manual de una calificación tributaria.</p>
+      {% endif %}
+    </div>
+    <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary btn-sm">Volver al mantenedor</a>
+  </div>
+
+  {% if form.non_field_errors or factores_form.non_field_errors %}
+    <div class="alert alert-danger">
+      {{ form.non_field_errors }}
+      {{ factores_form.non_field_errors }}
+    </div>
+  {% endif %}
+
+  <form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}
+
+    <div class="card mb-3">
+      <div class="card-header fw-semibold">Datos del instrumento</div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.ejercicio.id_for_label }}" class="form-label small mb-1">Ejercicio</label>
+            {{ form.ejercicio }}
+            {% for error in form.ejercicio.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.mercado.id_for_label }}" class="form-label small mb-1">Mercado</label>
+            {{ form.mercado }}
+            {% for error in form.mercado.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.instrumento.id_for_label }}" class="form-label small mb-1">Instrumento (NEMO)</label>
+            {{ form.instrumento }}
+            {% for error in form.instrumento.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-3">
+            <label for="{{ form.descripcion.id_for_label }}" class="form-label small mb-1">Descripción</label>
+            {{ form.descripcion }}
+            {% for error in form.descripcion.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-3">
+            <label for="{{ form.fecha_pago.id_for_label }}" class="form-label small mb-1">Fecha de pago</label>
+            {{ form.fecha_pago }}
+            {% for error in form.fecha_pago.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.secuencia_evento.id_for_label }}" class="form-label small mb-1">Secuencia evento</label>
+            {{ form.secuencia_evento }}
+            {% for error in form.secuencia_evento.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.numero_dividendo.id_for_label }}" class="form-label small mb-1">N° dividendo</label>
+            {{ form.numero_dividendo }}
+            {% for error in form.numero_dividendo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.tipo_sociedad.id_for_label }}" class="form-label small mb-1">Tipo sociedad</label>
+            {{ form.tipo_sociedad }}
+            {% for error in form.tipo_sociedad.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.valor_historico.id_for_label }}" class="form-label small mb-1">Valor histórico</label>
+            {{ form.valor_historico }}
+            {% for error in form.valor_historico.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.factor_actualizacion.id_for_label }}" class="form-label small mb-1">Factor actualización</label>
+            {{ form.factor_actualizacion }}
+            {% for error in form.factor_actualizacion.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.evento_capital.id_for_label }}" class="form-label small mb-1">Evento capital</label>
+            {{ form.evento_capital }}
+            {% for error in form.evento_capital.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label for="{{ form.origen.id_for_label }}" class="form-label small mb-1">Origen</label>
+            {{ form.origen }}
+            {% for error in form.origen.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-3">
+            <label for="{{ form.rut_cliente.id_for_label }}" class="form-label small mb-1">RUT cliente</label>
+            {{ form.rut_cliente }}
+            {% for error in form.rut_cliente.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="col-12 col-sm-6 col-lg-4">
+            <label for="{{ form.certificado_pdf.id_for_label }}" class="form-label small mb-1">Certificado PDF</label>
+            {{ form.certificado_pdf }}
+            {% for error in form.certificado_pdf.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            <div class="form-text">
+              PDF de hasta 10 MB con cabecera válida. Se guardará como
+              <code>[RUT]_[Ejercicio]_[N° dividendo].pdf</code>.
+            </div>
+            {% if modo == 'editar' and calificacion and calificacion.uri_documento %}
+              <a class="small" href="{% url 'calificaciones:calificacion_pdf' calificacion.pk %}" target="_blank" rel="noopener">
+                Ver certificado actual
+              </a>
+            {% endif %}
+          </div>
+
+          <div class="col-12 col-lg-3 d-flex flex-column justify-content-end gap-2">
+            <div class="form-check">
+              {{ form.acogido_isfut }}
+              <label class="form-check-label small" for="{{ form.acogido_isfut.id_for_label }}">Acogido ISFUT</label>
+            </div>
+            <div class="form-check">
+              {{ form.calificacion_pendiente }}
+              <label class="form-check-label small" for="{{ form.calificacion_pendiente.id_for_label }}">Calificación pendiente</label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span class="fw-semibold">Matriz de factores</span>
+        <span class="small">
+          Suma Factor-08 a Factor-37:
+          <span id="suma-factores" class="font-monospace fw-semibold">0.00000000</span>
+        </span>
+      </div>
+      <div class="card-body">
+        <div id="alerta-suma" class="alert alert-danger py-2 d-none" role="alert">
+          La suma de los factores Factor-08 a Factor-37 supera 1.00000000.
+        </div>
+
+        <div class="row g-3">
+          {% for columna in columnas_matriz %}
+            <div class="col-12 col-md-4">
+              {% for campo in columna %}
+                <div class="mb-2">
+                  <label for="{{ campo.id_for_label }}" class="form-label small mb-0">{{ campo.label }}</label>
+                  {{ campo }}
+                  {% for error in campo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary px-4">GRABAR / GUARDAR</button>
+      <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary px-4">CANCELAR</a>
+    </div>
+  </form>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      const salida = document.getElementById('suma-factores');
+      const alerta = document.getElementById('alerta-suma');
+      const entradas = Array.from(document.querySelectorAll('.factor-input'));
+
+      function esFactorSuma(entrada) {
+        const coincidencia = entrada.name.match(/factor_(\d{2})$/);
+        if (!coincidencia) {
+          return false;
+        }
+        const numero = parseInt(coincidencia[1], 10);
+        return numero >= 8 && numero <= 37;
+      }
+
+      function recalcular() {
+        let total = 0;
+        entradas.forEach(function (entrada) {
+          if (!esFactorSuma(entrada)) {
+            return;
+          }
+          const valor = parseFloat(entrada.value);
+          if (!Number.isNaN(valor)) {
+            total += valor;
+          }
+        });
+
+        salida.textContent = total.toFixed(8);
+        const excedido = total > 1.00000001;
+        salida.classList.toggle('text-danger', excedido);
+        alerta.classList.toggle('d-none', !excedido);
+      }
+
+      entradas.forEach(function (entrada) {
+        entrada.addEventListener('input', recalcular);
+        entrada.addEventListener('change', recalcular);
+      });
+
+      recalcular();
+    })();
+  </script>
+{% endblock %}

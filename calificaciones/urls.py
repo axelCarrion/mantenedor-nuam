@@ -15,9 +15,19 @@ urlpatterns = [
         name='calificacion_editar',
     ),
     path(
+        'calificaciones/<int:pk>/copiar/',
+        views.calificacion_copiar,
+        name='calificacion_copiar',
+    ),
+    path(
         'calificaciones/<int:pk>/eliminar/',
         views.calificacion_eliminar,
         name='calificacion_eliminar',
+    ),
+    path(
+        'calificaciones/<int:pk>/pdf/',
+        views.calificacion_pdf,
+        name='calificacion_pdf',
     ),
     path('calificaciones/carga-masiva/', views.carga_masiva, name='carga_masiva'),
     path('historial-ddjj/', views.historial_ddjj, name='historial_ddjj'),
