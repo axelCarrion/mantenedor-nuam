@@ -1,0 +1,69 @@
+{% extends 'calificaciones/base.html' %}
+
+{% block title %}Panel · Plataforma NUAM{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h3 mb-1">Panel de control</h1>
+      <p class="text-secondary mb-0">Mantenedor de Calificaciones Tributarias</p>
+    </div>
+    <div class="d-flex gap-2">
+      {% if puede_escribir %}
+        <a class="btn btn-primary btn-sm" href="{% url 'calificaciones:calificacion_crear' %}">Nueva calificación</a>
+        <a class="btn btn-outline-primary btn-sm" href="{% url 'calificaciones:carga_masiva' %}">Carga masiva CSV</a>
+      {% endif %}
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'calificaciones:historial_ddjj' %}">Historial DDJJ</a>
+      {% if es_administrador %}
+        <a class="btn btn-outline-dark btn-sm" href="{% url 'calificaciones:auditoria' %}">Auditoría</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-12 col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <p class="text-secondary text-uppercase small mb-1">Calificaciones</p>
+          <p class="display-6 mb-0">{{ total_calificaciones }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <p class="text-secondary text-uppercase small mb-1">Pendientes</p>
+          <p class="display-6 mb-0">{{ total_pendientes }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <p class="text-secondary text-uppercase small mb-1">Roles asignados</p>
+          {% for grupo in grupos_usuario %}
+            <span class="badge text-bg-secondary">{{ grupo }}</span>
+          {% empty %}
+            <span class="text-secondary small">Sin rol RBAC asignado</span>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header fw-semibold">Permisos de su rol</div>
+    <ul class="list-group list-group-flush">
+      {% for nombre, descripcion in descripcion_roles %}
+        <li class="list-group-item">
+          <strong>{{ nombre }}</strong><br>
+          <span class="text-secondary small">{{ descripcion }}</span>
+        </li>
+      {% empty %}
+        <li class="list-group-item text-secondary">
+          Su usuario no tiene un rol RBAC asignado; contacte al Administrador TI.
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endblock %}

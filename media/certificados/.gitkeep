@@ -1,0 +1,2 @@
+# Carpeta destino de los certificados subidos (MEDIA_ROOT/certificados).
+# Los archivos se excluyen del repositorio; este placeholder mantiene la carpeta.

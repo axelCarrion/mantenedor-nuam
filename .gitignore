@@ -1,0 +1,40 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# --- Entornos virtuales ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- Django ---
+*.log
+db.sqlite3
+db.sqlite3-journal
+/staticfiles/
+local_settings.py
+
+# --- Variables de entorno / secretos ---
+.env
+.env.*
+!.env.example
+
+# --- Media: certificados subidos por usuarios ---
+media/certificados/*
+!media/certificados/.gitkeep
+
+# --- Editores / Sistema ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

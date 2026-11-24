@@ -1,0 +1,37 @@
+{% extends 'calificaciones/base.html' %}
+
+{% block title %}Auditoría · Plataforma NUAM{% endblock %}
+
+{% block content %}
+  <h1 class="h3 mb-1">Registro de auditoría</h1>
+  <p class="text-secondary">Bitácora inmutable de operaciones (solo Administrador TI).</p>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-striped align-middle bg-white">
+      <thead>
+        <tr>
+          <th scope="col">Fecha</th>
+          <th scope="col">Usuario</th>
+          <th scope="col">Acción</th>
+          <th scope="col">Ref.</th>
+          <th scope="col">Detalle</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for registro in registros %}
+          <tr>
+            <td class="text-nowrap">{{ registro.timestamp|date:'Y-m-d H:i:s' }}</td>
+            <td>{{ registro.usuario|default:'—' }}</td>
+            <td><span class="badge text-bg-dark">{{ registro.accion }}</span></td>
+            <td>{{ registro.calificacion_id_ref|default:'—' }}</td>
+            <td class="small">{{ registro.detalle }}</td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="5" class="text-secondary">Aún no hay registros de auditoría.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}
