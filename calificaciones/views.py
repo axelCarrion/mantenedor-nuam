@@ -1,10 +1,12 @@
 """Vistas de la Plataforma NUAM: buscador, CRUD y certificados."""
 
+import uuid
 from pathlib import Path
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -24,9 +26,26 @@ from .permissions import (
     solo_administrador,
     escritura_calificaciones,
 )
+from .services.csv_loader import (
+    CABECERA_FACTOR,
+    CABECERA_MONTO,
+    TIPO_FACTOR,
+    TIPO_MONTO,
+    CargaMasivaError,
+    importar_filas,
+    procesar_csv,
+)
 
 REGISTROS_POR_PAGINA = 10
 ANIOS_PERIODO_BASE = [2026, 2025, 2024, 2023]
+
+CARPETA_CARGAS_TMP = 'cargas_tmp'
+TAMANO_MAXIMO_CSV = 10 * 1024 * 1024
+PLANTILLAS_CSV = (
+    'carga_x_factor_valida.csv',
+    'carga_x_monto_valida.csv',
+    'carga_con_errores_validacion.csv',
+)
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +86,106 @@ def _anios_disponibles() -> list[int]:
     anios = set(ANIOS_PERIODO_BASE)
     anios.update(Calificacion.objects.values_list('ejercicio', flat=True))
     return sorted(anios, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Soporte de carga masiva CSV
+# ---------------------------------------------------------------------------
+
+
+def _carpeta_cargas() -> Path:
+    carpeta = Path(settings.MEDIA_ROOT) / CARPETA_CARGAS_TMP
+    carpeta.mkdir(parents=True, exist_ok=True)
+    return carpeta
+
+
+def _ruta_temporal(token: str) -> Path:
+    return _carpeta_cargas() / Path(token).name
+
+
+def _guardar_temporal(archivo) -> str:
+    token = f'{uuid.uuid4().hex}.csv'
+    archivo.seek(0)
+    with open(_ruta_temporal(token), 'wb') as destino:
+        for bloque in archivo.chunks():
+            destino.write(bloque)
+    return token
+
+
+def _limpiar_carga(request) -> None:
+    info = request.session.pop('carga_masiva', None)
+    if not info:
+        return
+    ruta = _ruta_temporal(info.get('archivo', ''))
+    if ruta.is_file():
+        ruta.unlink(missing_ok=True)
+
+
+def _especificacion_columnas(tipo: str) -> list[dict]:
+    """Especificación de columnas para el modal VER FORMATO."""
+    columnas = [
+        (0, 'EJERCICIO', 'Entero de 4 dígitos (1000–9999).'),
+        (1, 'MERCADO', 'AC, ACN, ACCIONES, DE o DEUDA.'),
+        (2, 'NEMO', 'Texto no vacío, máximo 50 caracteres.'),
+        (3, 'FEC_PAGO', 'Fecha estricta DD-MM-AAAA.'),
+        (4, 'SEC_EVE', 'Entero mayor que 10000 (>= 10001).'),
+        (5, 'DESCRIPCION', 'Texto hasta 100 caracteres.'),
+        (6, 'RUT_CLIENTE', 'Texto no vacío hasta 12 caracteres.'),
+        (7, 'NUM_DIVIDENDO', 'Entero mayor o igual a 0.'),
+        (8, 'TIPO_SOCIEDAD', 'A (abierta) o C (cerrada).'),
+    ]
+
+    if tipo == TIPO_FACTOR:
+        for numero in range(8, 38):
+            posicion = 9 + (numero - 8)
+            obligatorio = numero <= 32
+            columnas.append(
+                (
+                    posicion,
+                    f'F{numero}',
+                    'Obligatorio; factor entre 0 y 1.'
+                    if obligatorio
+                    else 'Opcional (vacío = 0.00000000).',
+                )
+            )
+    else:
+        columnas.append(
+            (9, 'VALOR_HISTORICO', 'Monto mayor o igual a 0 (base B).')
+        )
+        for numero in range(8, 38):
+            posicion = 10 + (numero - 8)
+            obligatorio = numero <= 32
+            columnas.append(
+                (
+                    posicion,
+                    f'M{numero}',
+                    'Obligatorio; monto mayor o igual a 0.'
+                    if obligatorio
+                    else 'Opcional (vacío = 0).',
+                )
+            )
+
+    return [
+        {'posicion': posicion, 'columna': columna, 'regla': regla}
+        for posicion, columna, regla in columnas
+    ]
+
+
+def _contexto_carga(tipo: str, **extra) -> dict:
+    contexto = {
+        'tipo': tipo,
+        'es_monto': tipo == TIPO_MONTO,
+        'especificacion': _especificacion_columnas(tipo),
+        'cabecera': CABECERA_MONTO if tipo == TIPO_MONTO else CABECERA_FACTOR,
+        'etiquetas_factores': (
+            [f'M{numero}' for numero in range(8, 38)]
+            if tipo == TIPO_MONTO
+            else [f'F{numero}' for numero in range(8, 38)]
+        ),
+        'plantillas': PLANTILLAS_CSV,
+    }
+    contexto.update(extra)
+    return contexto
 
 
 def _contexto_formulario(form, factores_form, modo: str, calificacion=None):
@@ -397,12 +516,157 @@ def calificacion_pdf(request, pk: int):
 
 @escritura_calificaciones
 def carga_masiva(request):
-    tipo = request.GET.get('tipo', 'factor')
-    etiqueta = 'factor' if tipo != 'monto' else 'monto'
+    """Carga masiva CSV con previsualización, validación y confirmación."""
+    tipo_solicitado = request.POST.get('tipo') or request.GET.get('tipo')
+    tipo = TIPO_MONTO if tipo_solicitado == TIPO_MONTO else TIPO_FACTOR
+
+    if request.method == 'GET':
+        _limpiar_carga(request)
+        return render(
+            request,
+            'calificaciones/carga_masiva.html',
+            _contexto_carga(tipo),
+        )
+
+    accion = request.POST.get('accion', 'previsualizar')
+
+    if accion != 'grabar':
+        # Cualquier acción distinta de GRABAR invalida la previsualización
+        # anterior para no importar un archivo que ya no está en pantalla.
+        _limpiar_carga(request)
+
+    if accion == 'cancelar':
+        messages.info(request, 'Carga masiva cancelada.')
+        return redirect('calificaciones:dashboard')
+
+    if accion == 'grabar':
+        info = request.session.get('carga_masiva')
+        if not info:
+            messages.error(
+                request,
+                'No hay una previsualización vigente. Suba el archivo nuevamente.',
+            )
+            return redirect('calificaciones:carga_masiva')
+
+        ruta = _ruta_temporal(info['archivo'])
+        if not ruta.is_file():
+            _limpiar_carga(request)
+            messages.error(
+                request, 'El archivo temporal expiró. Vuelva a subirlo.'
+            )
+            return redirect('calificaciones:carga_masiva')
+
+        try:
+            with open(ruta, 'rb') as manejador:
+                resultado = procesar_csv(
+                    manejador, info['tipo'], info['nombre']
+                )
+        except CargaMasivaError as error:
+            _limpiar_carga(request)
+            messages.error(request, f'No se pudo procesar el CSV: {error}')
+            return redirect('calificaciones:carga_masiva')
+
+        creadas = []
+        try:
+            creadas = importar_filas(
+                resultado, request.user, info['nombre']
+            )
+        except IntegrityError:
+            _limpiar_carga(request)
+            messages.error(
+                request,
+                'No se pudo completar la carga: uno de los registros ya '
+                'existe o viola una restricción de la base de datos. '
+                'Revise el archivo y vuelva a intentarlo.',
+            )
+            return redirect('calificaciones:carga_masiva')
+
+        _limpiar_carga(request)
+
+        if creadas:
+            messages.success(
+                request,
+                f'Carga masiva completada: {len(creadas)} calificaciones '
+                f'importadas correctamente.',
+            )
+        else:
+            messages.warning(
+                request,
+                'No se importaron filas: todas tenían errores de validación.',
+            )
+        return redirect('calificaciones:dashboard')
+
+    # Acción PREVISUALIZAR / VALIDAR
+    archivo = request.FILES.get('archivo_csv')
+    if archivo is None:
+        messages.error(request, 'Debe seleccionar un archivo CSV.')
+        return render(
+            request,
+            'calificaciones/carga_masiva.html',
+            _contexto_carga(tipo),
+        )
+
+    if not archivo.name.lower().endswith('.csv'):
+        messages.error(request, 'El archivo debe tener extensión .csv.')
+        return render(
+            request,
+            'calificaciones/carga_masiva.html',
+            _contexto_carga(tipo),
+        )
+
+    if archivo.size > TAMANO_MAXIMO_CSV:
+        messages.error(request, 'El archivo CSV no puede superar 10 MB.')
+        return render(
+            request,
+            'calificaciones/carga_masiva.html',
+            _contexto_carga(tipo),
+        )
+
+    try:
+        resultado = procesar_csv(archivo, tipo, archivo.name)
+    except CargaMasivaError as error:
+        messages.error(request, f'No se pudo procesar el CSV: {error}')
+        return render(
+            request,
+            'calificaciones/carga_masiva.html',
+            _contexto_carga(tipo),
+        )
+
+    _limpiar_carga(request)
+    token = _guardar_temporal(archivo)
+    request.session['carga_masiva'] = {
+        'archivo': token,
+        'tipo': tipo,
+        'nombre': archivo.name,
+    }
+
     return render(
         request,
         'calificaciones/carga_masiva.html',
-        {'tipo': etiqueta},
+        _contexto_carga(
+            tipo,
+            resultado=resultado,
+            nombre_archivo=archivo.name,
+            puede_grabar=resultado.total_validas > 0,
+        ),
+    )
+
+
+@lectura_calificaciones
+def carga_masiva_plantilla(request, nombre: str):
+    """Descarga protegida de los CSV de ejemplo."""
+    if nombre not in PLANTILLAS_CSV:
+        raise Http404('Plantilla no disponible.')
+
+    ruta = Path(settings.BASE_DIR) / 'sample_csv' / nombre
+    if not ruta.is_file():
+        raise Http404('La plantilla no existe en el servidor.')
+
+    return FileResponse(
+        ruta.open('rb'),
+        as_attachment=True,
+        filename=nombre,
+        content_type='text/csv',
     )
 
 

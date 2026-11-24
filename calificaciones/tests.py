@@ -2,9 +2,11 @@
 
 import tempfile
 from datetime import date
+from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.base import ContentFile
@@ -15,6 +17,7 @@ from django.urls import reverse
 
 from .models import Calificacion, Factores, RegistroAuditoria, formatear
 from .permissions import GRUPO_ADMIN, GRUPO_AUDITOR, GRUPO_CORREDOR
+from .services.csv_loader import factores_desde_montos
 
 Usuario = get_user_model()
 PDF_VALIDO = b'%PDF-1.4\n% certificado de prueba\n%%EOF\n'
@@ -537,3 +540,341 @@ class SeedNuamTest(TestCase):
                 self.assertEqual(len(lineas_montos[0].split(';')), 40)
                 self.assertEqual(lineas_montos[0].split(';')[9], 'VALOR_HISTORICO')
                 self.assertEqual(lineas_montos[0].split(';')[10], 'M8')
+
+
+# ---------------------------------------------------------------------------
+# Carga masiva CSV
+# ---------------------------------------------------------------------------
+
+
+class CargaMasivaBaseTest(CRUDBaseTest):
+    """Utilidades comunes para las pruebas de carga masiva."""
+
+    def url_carga(self, tipo: str) -> str:
+        return f'{reverse("calificaciones:carga_masiva")}?tipo={tipo}'
+
+    def archivo_ejemplo(self, nombre: str) -> SimpleUploadedFile:
+        ruta = Path(settings.BASE_DIR) / 'sample_csv' / nombre
+        return SimpleUploadedFile(
+            nombre, ruta.read_bytes(), content_type='text/csv'
+        )
+
+    def previsualizar(self, nombre: str, tipo: str):
+        return self.client.post(
+            self.url_carga(tipo),
+            {
+                'tipo': tipo,
+                'accion': 'previsualizar',
+                'archivo_csv': self.archivo_ejemplo(nombre),
+            },
+        )
+
+    def grabar(self, tipo: str):
+        return self.client.post(
+            self.url_carga(tipo), {'tipo': tipo, 'accion': 'grabar'}
+        )
+
+
+class CargaMasivaFactorTest(CargaMasivaBaseTest):
+    def test_previsualiza_archivo_valido(self):
+        respuesta = self.previsualizar('carga_x_factor_valida.csv', 'factor')
+
+        self.assertEqual(respuesta.status_code, 200)
+        resultado = respuesta.context['resultado']
+        self.assertEqual(resultado.tipo, 'factor')
+        self.assertEqual(resultado.total_validas, 2)
+        self.assertEqual(resultado.total_errores, 0)
+        self.assertContains(respuesta, 'Válida')
+        self.assertContains(respuesta, '0.50000000')
+        self.assertContains(respuesta, 'filas válidas')
+
+    def test_grabar_persiste_factores_y_auditoria(self):
+        self.previsualizar('carga_x_factor_valida.csv', 'factor')
+        respuesta = self.grabar('factor')
+
+        self.assertRedirects(respuesta, reverse('calificaciones:dashboard'))
+        self.assertEqual(Calificacion.objects.count(), 2)
+
+        andina = Calificacion.objects.get(instrumento='ANDINA')
+        self.assertEqual(andina.fecha_pago, date(2025, 3, 12))
+        self.assertEqual(andina.secuencia_evento, 100000901)
+        self.assertEqual(andina.origen, Calificacion.ORIGEN_CORREDOR)
+        self.assertEqual(andina.creado_por, self.usuario)
+        self.assertEqual(formatear(andina.factores.factor_08), '0.50000000')
+        self.assertEqual(formatear(andina.factores.factor_09), '0.25000000')
+        self.assertEqual(formatear(andina.factores.factor_10), '0.25000000')
+        self.assertEqual(
+            formatear(andina.factores.total_suma_control), '1.00000000'
+        )
+
+        sqm = Calificacion.objects.get(instrumento='SQM-B')
+        self.assertEqual(formatear(sqm.factores.factor_16), '1.00000000')
+        self.assertEqual(formatear(sqm.factores.factor_08), '0.00000000')
+
+        auditoria = RegistroAuditoria.objects.get(accion='CARGA_MASIVA')
+        self.assertEqual(auditoria.usuario, self.usuario)
+        self.assertIsNone(auditoria.calificacion_id_ref)
+        self.assertEqual(auditoria.valor_nuevo['tipo'], 'factor')
+        self.assertEqual(
+            auditoria.valor_nuevo['archivo'], 'carga_x_factor_valida.csv'
+        )
+        self.assertEqual(len(auditoria.valor_nuevo['creados']), 2)
+        self.assertEqual(
+            {registro['instrumento'] for registro in auditoria.valor_nuevo['creados']},
+            {'ANDINA', 'SQM-B'},
+        )
+        self.assertIn('2 registros creados', auditoria.detalle)
+
+    def test_duplicados_en_archivo_se_reportan(self):
+        original = self.archivo_ejemplo('carga_x_factor_valida.csv')
+        lineas = original.read().decode('utf-8').splitlines()
+        contenido = '\n'.join([lineas[0], lineas[1], lineas[1]]) + '\n'
+
+        respuesta = self.client.post(
+            self.url_carga('factor'),
+            {
+                'tipo': 'factor',
+                'accion': 'previsualizar',
+                'archivo_csv': SimpleUploadedFile(
+                    'duplicados.csv',
+                    contenido.encode('utf-8'),
+                    content_type='text/csv',
+                ),
+            },
+        )
+
+        resultado = respuesta.context['resultado']
+        self.assertEqual(resultado.total_validas, 1)
+        self.assertEqual(resultado.total_errores, 1)
+        self.assertIn('Duplicada en el archivo', resultado.filas[1].errores[0])
+
+    def test_duplicados_contra_la_base_se_reportan(self):
+        self.previsualizar('carga_x_factor_valida.csv', 'factor')
+        self.grabar('factor')
+
+        respuesta = self.previsualizar('carga_x_factor_valida.csv', 'factor')
+        resultado = respuesta.context['resultado']
+
+        self.assertEqual(resultado.total_validas, 0)
+        self.assertEqual(resultado.total_errores, 2)
+        for fila in resultado.filas:
+            self.assertTrue(
+                any('Ya existe' in error for error in fila.errores),
+                fila.errores,
+            )
+
+
+class CargaMasivaMontoTest(CargaMasivaBaseTest):
+    def test_ambas_bases_de_calculo(self):
+        respuesta = self.previsualizar('carga_x_monto_valida.csv', 'monto')
+
+        self.assertEqual(respuesta.status_code, 200)
+        resultado = respuesta.context['resultado']
+        self.assertEqual(resultado.tipo, 'monto')
+        self.assertEqual(resultado.total_validas, 2)
+        self.assertEqual(resultado.total_errores, 0)
+
+        self.grabar('monto')
+        self.assertEqual(Calificacion.objects.count(), 2)
+
+        # B = VALOR_HISTORICO > 0
+        cencosud = Calificacion.objects.get(instrumento='CENCOSUD')
+        self.assertEqual(
+            formatear(cencosud.valor_historico), '1500.50000000'
+        )
+        self.assertEqual(formatear(cencosud.factores.factor_08), '0.60000000')
+        self.assertEqual(formatear(cencosud.factores.factor_09), '0.40000000')
+        self.assertEqual(
+            formatear(cencosud.factores.total_suma_control), '1.00000000'
+        )
+
+        # B = suma de montos porque VALOR_HISTORICO == 0
+        nuamtest = Calificacion.objects.get(instrumento='NUAMTEST')
+        self.assertEqual(formatear(nuamtest.valor_historico), '0.00000000')
+        self.assertEqual(formatear(nuamtest.factores.factor_08), '0.66666667')
+        self.assertEqual(formatear(nuamtest.factores.factor_09), '0.33333333')
+        self.assertEqual(
+            formatear(nuamtest.factores.total_suma_control), '1.00000000'
+        )
+
+        auditoria = RegistroAuditoria.objects.get(accion='CARGA_MASIVA')
+        self.assertEqual(auditoria.valor_nuevo['tipo'], 'monto')
+        self.assertEqual(len(auditoria.valor_nuevo['creados']), 2)
+
+
+class CargaMasivaErroresTest(CargaMasivaBaseTest):
+    def test_archivo_con_errores_reporta_motivos(self):
+        respuesta = self.previsualizar(
+            'carga_con_errores_validacion.csv', 'factor'
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        resultado = respuesta.context['resultado']
+        self.assertEqual(resultado.total_validas, 0)
+        self.assertEqual(resultado.total_errores, 2)
+        self.assertContains(respuesta, 'supera 1.00000000')
+        self.assertContains(respuesta, 'FEC_PAGO no es una fecha válida')
+        self.assertContains(respuesta, 'SEC_EVE debe ser mayor o igual a 10001')
+        self.assertContains(respuesta, 'Error')
+
+    def test_grabar_sin_filas_validas_no_crea_registros(self):
+        self.previsualizar('carga_con_errores_validacion.csv', 'factor')
+        respuesta = self.grabar('factor')
+
+        self.assertRedirects(respuesta, reverse('calificaciones:dashboard'))
+        self.assertEqual(Calificacion.objects.count(), 0)
+        self.assertFalse(
+            RegistroAuditoria.objects.filter(accion='CARGA_MASIVA').exists()
+        )
+
+    def test_rechaza_extension_distinta_de_csv(self):
+        respuesta = self.client.post(
+            self.url_carga('factor'),
+            {
+                'tipo': 'factor',
+                'accion': 'previsualizar',
+                'archivo_csv': SimpleUploadedFile(
+                    'datos.txt', b'EJERCICIO;MERCADO', content_type='text/plain'
+                ),
+            },
+        )
+        self.assertContains(respuesta, 'extensión .csv')
+        self.assertEqual(Calificacion.objects.count(), 0)
+
+    def test_rechaza_cabecera_incompleta(self):
+        contenido = 'EJERCICIO;MERCADO;NEMO\n2025;ACCIONES;X\n'
+        respuesta = self.client.post(
+            self.url_carga('factor'),
+            {
+                'tipo': 'factor',
+                'accion': 'previsualizar',
+                'archivo_csv': SimpleUploadedFile(
+                    'corta.csv',
+                    contenido.encode('utf-8'),
+                    content_type='text/csv',
+                ),
+            },
+        )
+        self.assertContains(respuesta, 'al menos 34 columnas')
+
+    def test_grabar_sin_previsualizacion_vigente(self):
+        respuesta = self.grabar('factor')
+        self.assertRedirects(
+            respuesta, reverse('calificaciones:carga_masiva')
+        )
+        self.assertEqual(Calificacion.objects.count(), 0)
+
+
+class ToleranciaRedondeoTest(TestCase):
+    def test_exceso_dentro_de_tolerancia_se_ajusta_al_factor_mayor(self):
+        factores, errores = factores_desde_montos(
+            [Decimal('1')] * 6, Decimal('0')
+        )
+
+        self.assertEqual(errores, [])
+        self.assertEqual(sum(factores, Decimal('0')), Decimal('1.00000000'))
+        self.assertEqual(factores[0], Decimal('0.16666665'))
+        self.assertEqual(factores[1], Decimal('0.16666667'))
+
+    def test_exceso_sobre_la_tolerancia_se_rechaza(self):
+        montos = [Decimal('1')] * 13 + [Decimal('5')]
+        factores, errores = factores_desde_montos(montos, Decimal('0'))
+
+        self.assertEqual(sum(factores, Decimal('0')), Decimal('1.00000006'))
+        self.assertTrue(
+            any('no es corregible' in error for error in errores), errores
+        )
+
+    def test_valor_historico_positivo_no_aplica_tolerancia(self):
+        montos = [Decimal('1')] * 13 + [Decimal('5')]
+        factores, errores = factores_desde_montos(montos, Decimal('18'))
+
+        self.assertEqual(sum(factores, Decimal('0')), Decimal('1.00000006'))
+        self.assertTrue(
+            any('no es corregible' in error for error in errores), errores
+        )
+
+    def test_base_cero_se_rechaza(self):
+        factores, errores = factores_desde_montos(
+            [Decimal('0')] * 3, Decimal('0')
+        )
+        self.assertTrue(any('mayor que 0' in error for error in errores))
+        self.assertEqual(set(factores), {Decimal('0.00000000')})
+
+    def test_montos_negativos_se_rechazan(self):
+        _, errores = factores_desde_montos(
+            [Decimal('1'), Decimal('-1')], Decimal('0')
+        )
+        self.assertTrue(
+            any('mayores o iguales a 0' in error for error in errores)
+        )
+
+
+class CargaMasivaRBACTest(CargaMasivaBaseTest):
+    def test_auditor_recibe_403(self):
+        auditor = Usuario.objects.create_user(
+            username='auditor_carga', password='clave-test'
+        )
+        auditor.groups.add(Group.objects.create(name=GRUPO_AUDITOR))
+        self.client.force_login(auditor)
+
+        self.assertEqual(
+            self.client.get(self.url_carga('factor')).status_code, 403
+        )
+        self.assertEqual(
+            self.client.post(
+                self.url_carga('factor'),
+                {'tipo': 'factor', 'accion': 'previsualizar'},
+            ).status_code,
+            403,
+        )
+
+    def test_corredor_accede_a_ambas_pestanas(self):
+        for tipo in ('factor', 'monto'):
+            with self.subTest(tipo=tipo):
+                respuesta = self.client.get(self.url_carga(tipo))
+                self.assertEqual(respuesta.status_code, 200)
+                self.assertContains(respuesta, 'Arrastre y suelte')
+
+    def test_anonimo_redirige_al_login(self):
+        self.client.logout()
+        respuesta = self.client.get(self.url_carga('factor'))
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertIn(reverse('login'), respuesta['Location'])
+
+    def test_plantilla_protegida_y_descargable(self):
+        respuesta = self.client.get(
+            reverse(
+                'calificaciones:carga_masiva_plantilla',
+                args=['carga_x_factor_valida.csv'],
+            )
+        )
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(respuesta['Content-Type'].startswith('text/csv'))
+        contenido = b''.join(respuesta.streaming_content)
+        self.assertTrue(contenido.startswith(b'EJERCICIO'))
+        respuesta.close()
+
+        auditor = Usuario.objects.create_user(
+            username='auditor_plantilla', password='clave-test'
+        )
+        auditor.groups.add(Group.objects.create(name=GRUPO_AUDITOR))
+        self.client.force_login(auditor)
+        respuesta = self.client.get(
+            reverse(
+                'calificaciones:carga_masiva_plantilla',
+                args=['carga_x_monto_valida.csv'],
+            )
+        )
+        self.assertEqual(respuesta.status_code, 200)
+        respuesta.close()
+
+    def test_plantilla_no_listada_devuelve_404(self):
+        respuesta = self.client.get(
+            reverse(
+                'calificaciones:carga_masiva_plantilla',
+                args=['archivo_secreto.csv'],
+            )
+        )
+        self.assertEqual(respuesta.status_code, 404)
+

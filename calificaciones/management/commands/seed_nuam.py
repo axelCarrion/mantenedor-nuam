@@ -376,11 +376,11 @@ class Command(BaseCommand):
         valida = [
             _fila_factores(
                 2025,
-                'ADP',
-                '2025-04-01',
-                133947,
-                'DIVIDENDO US$ 1,54',
-                '76111222-3',
+                'ANDINA',
+                '12-03-2025',
+                100000901,
+                'DIVIDENDO ANDINA 2025',
+                '76000001-1',
                 1,
                 {
                     'factor_08': '0.50000000',
@@ -390,11 +390,11 @@ class Command(BaseCommand):
             ),
             _fila_factores(
                 2025,
-                'JEEP',
-                '2025-01-02',
-                100000809,
-                'JEEP ACC 1X1',
-                '76333444-5',
+                'SQM-B',
+                '20-02-2025',
+                100000902,
+                'DIVIDENDO SQM-B 2025',
+                '76000002-2',
                 2,
                 {'factor_16': '1.00000000'},
             ),
@@ -402,20 +402,20 @@ class Command(BaseCommand):
 
         montos = [
             [
-                '2023',
+                '2024',
                 'ACCIONES',
-                'FROWARD',
-                '2023-05-23',
-                '100000391',
-                'DIVIDENDO DE PRUEBA',
-                '76555666-7',
-                '3',
+                'CENCOSUD',
+                '15-05-2024',
+                '100000903',
+                'DIVIDENDO CENCOSUD 2024',
+                '76000003-3',
+                '4',
                 'A',
                 '1500.50000000',
             ]
             + [
-                '0.60000000' if numero == 8 else
-                '0.40000000' if numero == 9 else
+                '900.30000000' if numero == 8 else
+                '600.20000000' if numero == 9 else
                 '0.00000000'
                 for numero in range(8, 38)
             ],
@@ -423,7 +423,7 @@ class Command(BaseCommand):
                 '2025',
                 'ACCIONES',
                 'NUAMTEST',
-                '2025-06-30',
+                '30-06-2025',
                 '100000777',
                 'PRUEBA BASE CERO',
                 '77000111-2',
@@ -432,7 +432,9 @@ class Command(BaseCommand):
                 '0.00000000',
             ]
             + [
-                '1.00000000' if numero == 8 else '0.00000000'
+                '100.00000000' if numero == 8 else
+                '50.00000000' if numero == 9 else
+                '0.00000000'
                 for numero in range(8, 38)
             ],
         ]
@@ -441,7 +443,7 @@ class Command(BaseCommand):
             _fila_factores(
                 2025,
                 'ERRSUM',
-                '2025-03-15',
+                '15-03-2025',
                 100000555,
                 'ERROR SUMA FACTORES',
                 '76999888-1',
@@ -454,7 +456,7 @@ class Command(BaseCommand):
             _fila_factores(
                 2025,
                 'ERRFEC',
-                '2025-13-45',
+                '45-13-2025',
                 10000,
                 'ERROR SECUENCIA Y FECHA',
                 '76999888-2',

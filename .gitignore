@@ -32,6 +32,9 @@ local_settings.py
 media/certificados/*
 !media/certificados/.gitkeep
 
+# --- Temporales de carga masiva CSV ---
+media/cargas_tmp/
+
 # --- Editores / Sistema ---
 .vscode/
 .idea/

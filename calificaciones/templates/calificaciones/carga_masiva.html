@@ -1,23 +1,312 @@
 {% extends 'calificaciones/base.html' %}
 
-{% block title %}Carga masiva · NUAM{% endblock %}
+{% block title %}Carga masiva CSV · NUAM{% endblock %}
 
 {% block content %}
-  <h1 class="h4 mb-1">Carga masiva CSV</h1>
-  <p class="text-secondary">Modalidad seleccionada: <strong>{{ tipo|upper }}</strong></p>
-
-  <div class="card">
-    <div class="card-body">
-      <p class="mb-2">
-        La carga masiva se implementará en el siguiente paso. Los archivos de
-        muestra están disponibles en <code>sample_csv/</code>:
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div>
+      <h1 class="h4 mb-1">Carga masiva CSV</h1>
+      <p class="text-secondary small mb-0">
+        Importe calificaciones desde un archivo delimitado por punto y coma (;).
       </p>
-      <ul class="mb-3 small">
-        <li><code>carga_x_factor_valida.csv</code></li>
-        <li><code>carga_x_monto_valida.csv</code></li>
-        <li><code>carga_con_errores_validacion.csv</code></li>
-      </ul>
-      <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary btn-sm">Volver al mantenedor</a>
+    </div>
+    <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary btn-sm">Volver al mantenedor</a>
+  </div>
+
+  <ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+      <a class="nav-link {% if not es_monto %}active{% endif %}" href="?tipo=factor">CARGA X FACTOR</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link {% if es_monto %}active{% endif %}" href="?tipo=monto">CARGA X MONTO</a>
+    </li>
+  </ul>
+
+  {% if resultado %}
+    <div class="alert {% if resultado.total_errores %}alert-warning{% else %}alert-success{% endif %} d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <strong>{{ resultado.total_validas }}</strong> filas válidas,
+        <strong>{{ resultado.total_errores }}</strong> filas con error ·
+        archivo <code>{{ nombre_archivo }}</code>
+      </div>
+      <div class="d-flex gap-2">
+        {% if resultado.total_errores %}
+          <span class="small">Solo se importarán las filas válidas.</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body p-0">
+        <div class="table-responsive" style="max-height: 55vh;">
+          <table class="table table-sm table-bordered table-striped align-middle mb-0 text-nowrap">
+            <thead class="table-dark" style="position: sticky; top: 0; z-index: 2;">
+              <tr>
+                <th scope="col">Fila</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Ejercicio</th>
+                <th scope="col">Mercado</th>
+                <th scope="col">Nemo</th>
+                <th scope="col">Fecha Pago</th>
+                <th scope="col">Secuencia</th>
+                <th scope="col">Descripción</th>
+                <th scope="col">RUT</th>
+                <th scope="col" class="text-end">N° Div.</th>
+                <th scope="col">Tipo</th>
+                {% if es_monto %}
+                  <th scope="col" class="text-end">Valor Histórico</th>
+                {% endif %}
+                {% for etiqueta in etiquetas_factores %}
+                  <th scope="col" class="text-end">{{ etiqueta }}</th>
+                {% endfor %}
+                <th scope="col">Detalle</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for fila in resultado.filas %}
+                <tr class="{% if not fila.valida %}table-danger{% endif %}">
+                  <td class="text-end">{{ fila.numero }}</td>
+                  <td>
+                    {% if fila.valida %}
+                      <span class="badge text-bg-success">Válida</span>
+                    {% else %}
+                      <span class="badge text-bg-danger">Error</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ fila.datos.ejercicio|default_if_none:'—' }}</td>
+                  <td>{{ fila.datos.mercado|default:'—' }}</td>
+                  <td>{{ fila.datos.instrumento|default:'—' }}</td>
+                  <td>{{ fila.datos.fecha_pago|date:'d-m-Y'|default:'—' }}</td>
+                  <td class="text-end">{{ fila.datos.secuencia_evento|default_if_none:'—' }}</td>
+                  <td>{{ fila.datos.descripcion|default:'—' }}</td>
+                  <td>{{ fila.datos.rut_cliente|default:'—' }}</td>
+                  <td class="text-end">{{ fila.datos.numero_dividendo|default_if_none:'—' }}</td>
+                  <td>{{ fila.datos.tipo_sociedad|default:'—' }}</td>
+                  {% if es_monto %}
+                    <td class="text-end font-monospace">{{ fila.valor_historico_formateado }}</td>
+                  {% endif %}
+                  {% for etiqueta, valor in fila.factores_formateados %}
+                    <td class="text-end font-monospace">{{ valor }}</td>
+                  {% endfor %}
+                  <td class="text-wrap" style="min-width: 18rem;">
+                    {% for error in fila.errores %}
+                      <div class="small text-danger">• {{ error }}</div>
+                    {% empty %}
+                      <span class="small text-success">Sin observaciones.</span>
+                    {% endfor %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <form method="post" action="?tipo={{ tipo }}" class="d-inline">
+        {% csrf_token %}
+        <input type="hidden" name="tipo" value="{{ tipo }}">
+        <input type="hidden" name="accion" value="grabar">
+        <button type="submit" class="btn btn-success px-4" {% if not puede_grabar %}disabled{% endif %}>
+          GRABAR
+        </button>
+      </form>
+
+      <form method="post" action="?tipo={{ tipo }}" class="d-inline">
+        {% csrf_token %}
+        <input type="hidden" name="tipo" value="{{ tipo }}">
+        <input type="hidden" name="accion" value="cancelar">
+        <button type="submit" class="btn btn-outline-secondary px-4">CANCELAR</button>
+      </form>
+
+      <a href="?tipo={{ tipo }}" class="btn btn-link btn-sm">Subir otro archivo</a>
+
+      {% if not puede_grabar %}
+        <span class="text-danger small">
+          No hay filas válidas: corrija el CSV o cancele la carga.
+        </span>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="card mb-3">
+      <div class="card-body">
+        <form method="post" action="?tipo={{ tipo }}" enctype="multipart/form-data" id="form-carga">
+          {% csrf_token %}
+          <input type="hidden" name="tipo" value="{{ tipo }}">
+          <input type="hidden" name="accion" value="previsualizar">
+
+          <div id="zona-drop"
+               class="border border-2 border-secondary-subtle rounded-3 bg-light text-center p-5 mb-3"
+               role="button" tabindex="0"
+               aria-label="Arrastre y suelte su archivo CSV aquí">
+            <p class="fs-5 mb-1">Arrastre y suelte su archivo CSV aquí</p>
+            <p class="text-secondary small mb-3">Delimitado por punto y coma (;), hasta 10 MB.</p>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="btn-seleccionar">
+              Seleccionar Archivo
+            </button>
+            <div class="small mt-2 text-secondary" id="nombre-archivo">Ningún archivo seleccionado.</div>
+            <input type="file" name="archivo_csv" id="archivo_csv" accept=".csv"
+                   class="d-none">
+          </div>
+
+          <div class="d-flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary px-4">PREVISUALIZAR / VALIDAR</button>
+            <button type="button" class="btn btn-outline-dark px-3"
+                    data-bs-toggle="modal" data-bs-target="#modalFormato">
+              VER FORMATO
+            </button>
+            <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary px-4">CANCELAR</a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header fw-semibold">Resumen del formato</div>
+      <div class="card-body small">
+        <p class="mb-1">
+          Cabecera obligatoria en las posiciones 0 a 8 y
+          {% if es_monto %}<code>VALOR_HISTORICO</code> + <code>M8</code> a <code>M37</code>{% else %}<code>F8</code> a <code>F37</code>{% endif %}.
+        </p>
+        <p class="mb-0 text-secondary">
+          {% if es_monto %}
+            Los montos se convierten a factores con base B (valor histórico o suma de montos)
+            y tolerancia de redondeo de 0.00000005.
+          {% else %}
+            Los factores F8 a F32 son obligatorios; F33 a F37 opcionales.
+            La suma de F8 a F37 no puede superar 1.00000000.
+          {% endif %}
+        </p>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="modal fade" id="modalFormato" tabindex="-1" aria-labelledby="tituloFormato" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title fs-5" id="tituloFormato">
+            Formato CSV · {% if es_monto %}Carga x Monto{% else %}Carga x Factor{% endif %}
+          </h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <h3 class="h6">Especificación de columnas</h3>
+          <div class="table-responsive mb-3" style="max-height: 40vh;">
+            <table class="table table-sm table-striped align-middle mb-0">
+              <thead class="table-dark" style="position: sticky; top: 0;">
+                <tr>
+                  <th scope="col" class="text-end">Pos.</th>
+                  <th scope="col">Columna</th>
+                  <th scope="col">Regla</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for columna in especificacion %}
+                  <tr>
+                    <td class="text-end font-monospace">{{ columna.posicion }}</td>
+                    <td class="font-monospace">{{ columna.columna }}</td>
+                    <td class="small">{{ columna.regla }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="h6">Reglas de validación</h3>
+          <ul class="small mb-3">
+            <li>Delimitador <code>;</code>, codificación UTF-8 (con o sin BOM) o Latin-1.</li>
+            <li>Decimales con punto o coma; se cuantizan a 8 decimales con ROUND_HALF_UP.</li>
+            <li>Fecha estricta <code>DD-MM-AAAA</code>; secuencia de evento <code>&gt; 10000</code>.</li>
+            {% if es_monto %}
+              <li>Montos <code>&gt;= 0</code>; <code>B = VALOR_HISTORICO</code> si es positivo, si no la suma de montos.</li>
+              <li>Tolerancia de redondeo: exceso de hasta <code>0.00000005</code> solo si <code>VALOR_HISTORICO = 0</code>.</li>
+            {% else %}
+              <li>Cada factor en <code>[0.00000000, 1.00000000]</code>; suma F8–F37 <code>&lt;= 1.00000000</code>.</li>
+            {% endif %}
+            <li>Se rechazan duplicados dentro del archivo y contra la base de datos.</li>
+          </ul>
+
+          <h3 class="h6">Archivos de ejemplo</h3>
+          <div class="d-flex flex-wrap gap-2">
+            {% for plantilla in plantillas %}
+              <a class="btn btn-outline-primary btn-sm"
+                 href="{% url 'calificaciones:carga_masiva_plantilla' plantilla %}">
+                {{ plantilla }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
     </div>
   </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      const zona = document.getElementById('zona-drop');
+      if (!zona) {
+        return;
+      }
+
+      const entrada = document.getElementById('archivo_csv');
+      const boton = document.getElementById('btn-seleccionar');
+      const etiqueta = document.getElementById('nombre-archivo');
+
+      function actualizarNombre() {
+        const archivo = entrada.files && entrada.files[0];
+        etiqueta.textContent = archivo
+          ? archivo.name
+          : 'Ningún archivo seleccionado.';
+      }
+
+      boton.addEventListener('click', function () {
+        entrada.click();
+      });
+
+      zona.addEventListener('click', function (evento) {
+        if (evento.target === boton || evento.target === entrada) {
+          return;
+        }
+        entrada.click();
+      });
+
+      zona.addEventListener('keydown', function (evento) {
+        if (evento.key === 'Enter' || evento.key === ' ') {
+          evento.preventDefault();
+          entrada.click();
+        }
+      });
+
+      entrada.addEventListener('change', actualizarNombre);
+
+      ['dragenter', 'dragover'].forEach(function (nombre) {
+        zona.addEventListener(nombre, function (evento) {
+          evento.preventDefault();
+          zona.classList.add('border-primary', 'bg-primary-subtle');
+        });
+      });
+
+      ['dragleave', 'drop'].forEach(function (nombre) {
+        zona.addEventListener(nombre, function (evento) {
+          evento.preventDefault();
+          zona.classList.remove('border-primary', 'bg-primary-subtle');
+        });
+      });
+
+      zona.addEventListener('drop', function (evento) {
+        const archivos = evento.dataTransfer.files;
+        if (!archivos || !archivos.length) {
+          return;
+        }
+        entrada.files = archivos;
+        actualizarNombre();
+      });
+    })();
+  </script>
 {% endblock %}

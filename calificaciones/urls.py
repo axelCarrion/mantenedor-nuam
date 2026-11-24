@@ -30,6 +30,11 @@ urlpatterns = [
         name='calificacion_pdf',
     ),
     path('calificaciones/carga-masiva/', views.carga_masiva, name='carga_masiva'),
+    path(
+        'calificaciones/carga-masiva/plantilla/<str:nombre>/',
+        views.carga_masiva_plantilla,
+        name='carga_masiva_plantilla',
+    ),
     path('historial-ddjj/', views.historial_ddjj, name='historial_ddjj'),
     path('auditoria/', views.auditoria, name='auditoria'),
 ]
