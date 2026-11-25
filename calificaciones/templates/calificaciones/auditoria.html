@@ -3,35 +3,170 @@
 {% block title %}Auditoría · Plataforma NUAM{% endblock %}
 
 {% block content %}
-  <h1 class="h3 mb-1">Registro de auditoría</h1>
-  <p class="text-secondary">Bitácora inmutable de operaciones (solo Administrador TI).</p>
-
-  <div class="table-responsive">
-    <table class="table table-sm table-striped align-middle bg-white">
-      <thead>
-        <tr>
-          <th scope="col">Fecha</th>
-          <th scope="col">Usuario</th>
-          <th scope="col">Acción</th>
-          <th scope="col">Ref.</th>
-          <th scope="col">Detalle</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for registro in registros %}
-          <tr>
-            <td class="text-nowrap">{{ registro.timestamp|date:'Y-m-d H:i:s' }}</td>
-            <td>{{ registro.usuario|default:'—' }}</td>
-            <td><span class="badge text-bg-dark">{{ registro.accion }}</span></td>
-            <td>{{ registro.calificacion_id_ref|default:'—' }}</td>
-            <td class="small">{{ registro.detalle }}</td>
-          </tr>
-        {% empty %}
-          <tr>
-            <td colspan="5" class="text-secondary">Aún no hay registros de auditoría.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div>
+      <h1 class="h4 mb-1">Registro de auditoría</h1>
+      <p class="text-secondary small mb-0">
+        Bitácora inmutable de operaciones. Acceso exclusivo del Administrador TI.
+      </p>
+    </div>
+    <span class="badge text-bg-dark align-self-start">Solo lectura</span>
   </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <form method="get" class="row g-2 align-items-end">
+        <div class="col-sm-6 col-lg-2">
+          <label for="usuario" class="form-label small mb-1">Usuario</label>
+          <select class="form-select form-select-sm" id="usuario" name="usuario">
+            <option value="">Todos</option>
+            {% for username in usuarios %}
+              <option value="{{ username }}" {% if filtros.usuario == username %}selected{% endif %}>{{ username }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-sm-6 col-lg-3">
+          <label for="accion" class="form-label small mb-1">Acción</label>
+          <select class="form-select form-select-sm" id="accion" name="accion">
+            <option value="">Todas</option>
+            {% for codigo, nombre in acciones %}
+              <option value="{{ codigo }}" {% if filtros.accion == codigo %}selected{% endif %}>{{ codigo }} — {{ nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-sm-6 col-lg-2">
+          <label for="desde" class="form-label small mb-1">Desde</label>
+          <input type="date" class="form-control form-control-sm" id="desde"
+                 name="desde" value="{{ filtros.desde }}">
+        </div>
+
+        <div class="col-sm-6 col-lg-2">
+          <label for="hasta" class="form-label small mb-1">Hasta</label>
+          <input type="date" class="form-control form-control-sm" id="hasta"
+                 name="hasta" value="{{ filtros.hasta }}">
+        </div>
+
+        <div class="col-lg-3 d-flex gap-2">
+          <button type="submit" class="btn btn-primary btn-sm px-4">FILTRAR</button>
+          <a href="{% url 'calificaciones:auditoria' %}" class="btn btn-outline-secondary btn-sm px-4">LIMPIAR</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped table-hover align-middle mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th scope="col" class="text-nowrap">Fecha y Hora</th>
+            <th scope="col">Usuario</th>
+            <th scope="col">Acción</th>
+            <th scope="col" class="text-end">ID Calificación</th>
+            <th scope="col">Detalle</th>
+            <th scope="col" class="text-end">Cambios</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for registro in registros %}
+            <tr>
+              <td class="text-nowrap font-monospace">{{ registro.timestamp|date:'d-m-Y H:i:s' }}</td>
+              <td>{{ registro.usuario.username|default:'—' }}</td>
+              <td>
+                <span class="badge text-bg-{{ registro.accion_badge }}">{{ registro.accion }}</span>
+              </td>
+              <td class="text-end">{{ registro.calificacion_id_ref|default_if_none:'—' }}</td>
+              <td class="small">{{ registro.detalle }}</td>
+              <td class="text-end">
+                <button type="button" class="btn btn-outline-primary btn-sm text-nowrap"
+                        data-bs-toggle="modal" data-bs-target="#modalCambios{{ registro.pk }}">
+                  Ver Cambios (JSON)
+                </button>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="6" class="text-secondary">No hay registros de auditoría para los filtros seleccionados.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-footer d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span class="small text-secondary">
+        {% if page_obj.paginator.count %}
+          Elementos mostrados {{ page_obj.start_index }} - {{ page_obj.end_index }} de {{ page_obj.paginator.count }}
+        {% else %}
+          No hay registros.
+        {% endif %}
+      </span>
+
+      {% if page_obj.paginator.num_pages > 1 %}
+        <nav aria-label="Paginación de auditoría">
+          <ul class="pagination pagination-sm mb-0">
+            <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+              <a class="page-link"
+                 href="?{% if querystring %}{{ querystring }}&{% endif %}page={% if page_obj.has_previous %}{{ page_obj.previous_page_number }}{% else %}1{% endif %}">Anterior</a>
+            </li>
+            <li class="page-item disabled">
+              <span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+            </li>
+            <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+              <a class="page-link"
+                 href="?{% if querystring %}{{ querystring }}&{% endif %}page={% if page_obj.has_next %}{{ page_obj.next_page_number }}{% else %}{{ page_obj.paginator.num_pages }}{% endif %}">Siguiente</a>
+            </li>
+          </ul>
+        </nav>
+      {% endif %}
+    </div>
+  </div>
+
+  {% for registro in registros %}
+    <div class="modal fade" id="modalCambios{{ registro.pk }}" tabindex="-1"
+         aria-labelledby="tituloCambios{{ registro.pk }}" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div>
+              <h2 class="modal-title fs-5" id="tituloCambios{{ registro.pk }}">
+                Cambios registrados · {{ registro.accion }}
+              </h2>
+              <p class="text-secondary small mb-0">
+                {{ registro.timestamp|date:'d-m-Y H:i:s' }} · {{ registro.usuario.username|default:'Sistema' }}
+                {% if registro.calificacion_id_ref %}· ID calificación {{ registro.calificacion_id_ref }}{% endif %}
+              </p>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+          </div>
+          <div class="modal-body">
+            <p class="small text-secondary">{{ registro.detalle }}</p>
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <h3 class="h6">Valor anterior</h3>
+                {% if registro.valor_anterior_json %}
+                  <pre class="bg-body-secondary border rounded p-3 small mb-0" style="max-height: 55vh; overflow: auto;">{{ registro.valor_anterior_json }}</pre>
+                {% else %}
+                  <p class="text-secondary small mb-0">Sin datos anteriores.</p>
+                {% endif %}
+              </div>
+              <div class="col-lg-6">
+                <h3 class="h6">Valor nuevo</h3>
+                {% if registro.valor_nuevo_json %}
+                  <pre class="bg-body-secondary border rounded p-3 small mb-0" style="max-height: 55vh; overflow: auto;">{{ registro.valor_nuevo_json }}</pre>
+                {% else %}
+                  <p class="text-secondary small mb-0">Sin datos nuevos.</p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
 {% endblock %}

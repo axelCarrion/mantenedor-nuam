@@ -446,6 +446,15 @@ class RegistroAuditoria(models.Model):
         (ACCION_CONSULTA_HISTORICA, 'Consulta histórica'),
     ]
 
+    #: Clase Bootstrap del badge asociado a cada acción.
+    ACCION_BADGES = {
+        ACCION_CREAR: 'success',
+        ACCION_MODIFICAR: 'warning',
+        ACCION_ELIMINAR: 'danger',
+        ACCION_CARGA_MASIVA: 'primary',
+        ACCION_CONSULTA_HISTORICA: 'info',
+    }
+
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -471,6 +480,11 @@ class RegistroAuditoria(models.Model):
 
     def __str__(self) -> str:
         return f'{self.accion} #{self.calificacion_id_ref} ({self.timestamp:%Y-%m-%d %H:%M})'
+
+    @property
+    def accion_badge(self) -> str:
+        """Clase Bootstrap del badge según el tipo de acción."""
+        return self.ACCION_BADGES.get(self.accion, 'secondary')
 
     def save(self, *args, **kwargs):
         if not self._state.adding:

@@ -1,5 +1,6 @@
 """Vistas de la Plataforma NUAM: buscador, CRUD y certificados."""
 
+import json
 import uuid
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.dateparse import parse_date
 
 from .auditoria import registrar_auditoria, serializar_calificacion
 from .forms import CalificacionForm, FactoresForm
@@ -37,6 +39,8 @@ from .services.csv_loader import (
 )
 
 REGISTROS_POR_PAGINA = 10
+HISTORIAL_POR_PAGINA = 15
+AUDITORIA_POR_PAGINA = 20
 ANIOS_PERIODO_BASE = [2026, 2025, 2024, 2023]
 
 CARPETA_CARGAS_TMP = 'cargas_tmp'
@@ -670,17 +674,148 @@ def carga_masiva_plantilla(request, nombre: str):
     )
 
 
+def _json_legible(valor) -> str | None:
+    """Serializa un snapshot JSON con indentación legible para la vista."""
+    if valor is None:
+        return None
+    return json.dumps(valor, indent=2, ensure_ascii=False, sort_keys=True)
+
+
 @lectura_calificaciones
 def historial_ddjj(request):
-    return render(request, 'calificaciones/historial_ddjj.html')
+    """Buscador histórico de Declaraciones Juradas con auditoría de consultas."""
+    filtros = {
+        'rut_cliente': request.GET.get('rut_cliente', '').strip(),
+        'ejercicio': request.GET.get('ejercicio', '').strip(),
+        'instrumento': request.GET.get('instrumento', '').strip(),
+    }
+    busqueda = any(filtros.values())
+
+    calificaciones = Calificacion.objects.none()
+    total = 0
+
+    if busqueda:
+        calificaciones = Calificacion.objects.select_related(
+            'factores'
+        ).order_by(
+            '-ejercicio', 'instrumento', 'fecha_pago', 'secuencia_evento'
+        )
+
+        if filtros['rut_cliente']:
+            calificaciones = calificaciones.filter(
+                rut_cliente__icontains=filtros['rut_cliente']
+            )
+        if filtros['ejercicio'].isdigit():
+            calificaciones = calificaciones.filter(
+                ejercicio=int(filtros['ejercicio'])
+            )
+        if filtros['instrumento']:
+            calificaciones = calificaciones.filter(
+                instrumento__icontains=filtros['instrumento']
+            )
+
+        total = calificaciones.count()
+        detalle = f'Consulta histórica DDJJ: {total} resultado(s)'
+        criterios = []
+        if filtros['rut_cliente']:
+            criterios.append(f'RUT {filtros["rut_cliente"]}')
+        if filtros['ejercicio']:
+            criterios.append(f'ejercicio {filtros["ejercicio"]}')
+        if filtros['instrumento']:
+            criterios.append(f'instrumento {filtros["instrumento"]}')
+        if criterios:
+            detalle += ' — ' + ', '.join(criterios)
+        detalle += '.'
+
+        registrar_auditoria(
+            request.user,
+            RegistroAuditoria.ACCION_CONSULTA_HISTORICA,
+            None,
+            detalle,
+            valor_nuevo={'filtros': filtros, 'resultados': total},
+        )
+
+    paginador = Paginator(calificaciones, HISTORIAL_POR_PAGINA)
+    pagina = paginador.get_page(request.GET.get('page'))
+
+    parametros = request.GET.copy()
+    parametros.pop('page', None)
+
+    return render(
+        request,
+        'calificaciones/historial_ddjj.html',
+        {
+            'filtros': filtros,
+            'busqueda': busqueda,
+            'page_obj': pagina,
+            'paginator': paginador,
+            'total': total,
+            'anios': _anios_disponibles(),
+            'columnas_factores': _columnas_factores(),
+            'querystring': parametros.urlencode(),
+        },
+    )
 
 
 @solo_administrador
 def auditoria(request):
     """Log inmutable de operaciones; exclusivo del Administrador TI."""
-    registros = RegistroAuditoria.objects.select_related('usuario')[:100]
+    filtros = {
+        'usuario': request.GET.get('usuario', '').strip(),
+        'accion': request.GET.get('accion', '').strip(),
+        'desde': request.GET.get('desde', '').strip(),
+        'hasta': request.GET.get('hasta', '').strip(),
+    }
+
+    registros = RegistroAuditoria.objects.select_related('usuario').order_by(
+        '-timestamp', '-pk'
+    )
+
+    if filtros['usuario']:
+        registros = registros.filter(
+            usuario__username=filtros['usuario']
+        )
+    if filtros['accion'] in dict(RegistroAuditoria.ACCION_CHOICES):
+        registros = registros.filter(accion=filtros['accion'])
+
+    desde = parse_date(filtros['desde']) if filtros['desde'] else None
+    hasta = parse_date(filtros['hasta']) if filtros['hasta'] else None
+    if desde:
+        registros = registros.filter(timestamp__date__gte=desde)
+    if hasta:
+        registros = registros.filter(timestamp__date__lte=hasta)
+
+    paginador = Paginator(registros, AUDITORIA_POR_PAGINA)
+    pagina = paginador.get_page(request.GET.get('page'))
+
+    registros_pagina = list(pagina.object_list)
+    for registro in registros_pagina:
+        registro.valor_anterior_json = _json_legible(
+            registro.valor_anterior
+        )
+        registro.valor_nuevo_json = _json_legible(registro.valor_nuevo)
+
+    usuarios = (
+        RegistroAuditoria.objects.exclude(usuario__isnull=True)
+        .values_list('usuario__username', flat=True)
+        .distinct()
+        .order_by('usuario__username')
+    )
+
+    parametros = request.GET.copy()
+    parametros.pop('page', None)
+
     return render(
         request,
         'calificaciones/auditoria.html',
-        {'registros': registros},
+        {
+            'filtros': filtros,
+            'page_obj': pagina,
+            'paginator': paginador,
+            'registros': registros_pagina,
+            'usuarios': usuarios,
+            'acciones': RegistroAuditoria.ACCION_CHOICES,
+            'total': paginador.count,
+            'querystring': parametros.urlencode(),
+        },
     )

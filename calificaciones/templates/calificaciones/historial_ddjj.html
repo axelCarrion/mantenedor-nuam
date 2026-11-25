@@ -3,18 +3,138 @@
 {% block title %}Historial DDJJ · NUAM{% endblock %}
 
 {% block content %}
-  <h1 class="h4 mb-1">Buscador histórico de Declaraciones Juradas (DDJJ)</h1>
-  <p class="text-secondary">
-    Módulo de consulta histórica. Disponible para todos los roles de la plataforma.
-  </p>
-
-  <div class="card">
-    <div class="card-body">
-      <p class="mb-3">
-        El buscador histórico se habilitará en un próximo paso, reutilizando los
-        filtros del mantenedor y el acceso de solo lectura para Auditor / Cumplimiento.
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div>
+      <h1 class="h4 mb-1">Buscador histórico de Declaraciones Juradas (DDJJ)</h1>
+      <p class="text-secondary small mb-0">
+        Consulta de calificaciones tributarias por RUT, ejercicio e instrumento.
       </p>
-      <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary btn-sm">Volver al mantenedor</a>
+    </div>
+    <a href="{% url 'calificaciones:dashboard' %}" class="btn btn-outline-secondary btn-sm">Volver al mantenedor</a>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <form method="get" class="row g-2 align-items-end">
+        <div class="col-sm-6 col-lg-3">
+          <label for="rut_cliente" class="form-label small mb-1">RUT Cliente</label>
+          <input type="text" class="form-control form-control-sm" id="rut_cliente"
+                 name="rut_cliente" value="{{ filtros.rut_cliente }}"
+                 placeholder="Ej. 76555666-7" maxlength="12" autocomplete="off">
+        </div>
+
+        <div class="col-sm-6 col-lg-2">
+          <label for="ejercicio" class="form-label small mb-1">Ejercicio</label>
+          <input type="number" class="form-control form-control-sm" id="ejercicio"
+                 name="ejercicio" value="{{ filtros.ejercicio }}"
+                 placeholder="Ej. 2023" min="1000" max="9999" list="anios-historial">
+          <datalist id="anios-historial">
+            {% for anio in anios %}<option value="{{ anio }}"></option>{% endfor %}
+          </datalist>
+        </div>
+
+        <div class="col-sm-6 col-lg-3">
+          <label for="instrumento" class="form-label small mb-1">Instrumento</label>
+          <input type="text" class="form-control form-control-sm" id="instrumento"
+                 name="instrumento" value="{{ filtros.instrumento }}"
+                 placeholder="Ej. FROWARD" maxlength="50" autocomplete="off">
+        </div>
+
+        <div class="col-sm-6 col-lg-4 d-flex gap-2">
+          <button type="submit" class="btn btn-primary btn-sm px-4">BUSCAR</button>
+          <a href="{% url 'calificaciones:historial_ddjj' %}" class="btn btn-outline-secondary btn-sm px-4">LIMPIAR</a>
+        </div>
+      </form>
     </div>
   </div>
+
+  {% if busqueda %}
+    <div class="alert {% if total %}alert-info{% else %}alert-warning{% endif %} d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span>
+        <strong>{{ total }}</strong> registro{{ total|pluralize }} encontrado{{ total|pluralize }}
+        {% if filtros.rut_cliente %}· RUT <strong>{{ filtros.rut_cliente }}</strong>{% endif %}
+        {% if filtros.ejercicio %}· Ejercicio <strong>{{ filtros.ejercicio }}</strong>{% endif %}
+        {% if filtros.instrumento %}· Instrumento <strong>{{ filtros.instrumento }}</strong>{% endif %}
+      </span>
+      {% if not total %}
+        <span class="small">No hay registros para los filtros ingresados.</span>
+      {% endif %}
+    </div>
+
+    {% if page_obj %}
+      <div class="card">
+        <div class="table-responsive" style="max-height: 70vh;">
+          <table class="table table-sm table-striped table-hover align-middle mb-0 text-nowrap">
+            <thead class="table-dark" style="position: sticky; top: 0; z-index: 2;">
+              <tr>
+                <th scope="col">Ejercicio</th>
+                <th scope="col">RUT Cliente</th>
+                <th scope="col">Instrumento</th>
+                <th scope="col">Fecha Pago</th>
+                <th scope="col" class="text-end">N° Dividendo</th>
+                <th scope="col" class="text-end">Secuencia</th>
+                {% for etiqueta in columnas_factores %}
+                  <th scope="col" class="text-end">{{ etiqueta }}</th>
+                {% endfor %}
+                <th scope="col">Certificado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for calificacion in page_obj %}
+                <tr>
+                  <td>{{ calificacion.ejercicio }}</td>
+                  <td class="font-monospace">{{ calificacion.rut_cliente }}</td>
+                  <td class="fw-semibold">{{ calificacion.instrumento }}</td>
+                  <td>{{ calificacion.fecha_pago|date:'d-m-Y' }}</td>
+                  <td class="text-end">{{ calificacion.numero_dividendo }}</td>
+                  <td class="text-end font-monospace">{{ calificacion.secuencia_evento }}</td>
+                  {% for etiqueta, valor in calificacion.factores_para_mostrar.valores_formateados %}
+                    <td class="text-end font-monospace">{{ valor }}</td>
+                  {% endfor %}
+                  <td>
+                    {% if calificacion.uri_documento %}
+                      <a href="{% url 'calificaciones:calificacion_pdf' calificacion.pk %}"
+                         class="btn btn-danger btn-sm text-nowrap" target="_blank" rel="noopener">
+                        Descargar Certificado PDF
+                      </a>
+                    {% else %}
+                      <span class="badge text-bg-secondary">Sin PDF adjunto</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card-footer d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <span class="small text-secondary">
+            Elementos mostrados {{ page_obj.start_index }} - {{ page_obj.end_index }} de {{ page_obj.paginator.count }}
+          </span>
+
+          {% if page_obj.paginator.num_pages > 1 %}
+            <nav aria-label="Paginación del historial DDJJ">
+              <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+                  <a class="page-link"
+                     href="?{% if querystring %}{{ querystring }}&{% endif %}page={% if page_obj.has_previous %}{{ page_obj.previous_page_number }}{% else %}1{% endif %}">Anterior</a>
+                </li>
+                <li class="page-item disabled">
+                  <span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+                </li>
+                <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+                  <a class="page-link"
+                     href="?{% if querystring %}{{ querystring }}&{% endif %}page={% if page_obj.has_next %}{{ page_obj.next_page_number }}{% else %}{{ page_obj.paginator.num_pages }}{% endif %}">Siguiente</a>
+                </li>
+              </ul>
+            </nav>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="alert alert-light border">
+      Ingrese un RUT, un ejercicio y/o un instrumento para consultar el historial de Declaraciones Juradas.
+    </div>
+  {% endif %}
 {% endblock %}

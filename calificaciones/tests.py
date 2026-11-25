@@ -1,7 +1,7 @@
 """Pruebas de RBAC, buscador, CRUD, PDF y auditoría."""
 
 import tempfile
-from datetime import date
+from datetime import date, datetime, timezone as dt_timezone
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
@@ -877,4 +877,288 @@ class CargaMasivaRBACTest(CargaMasivaBaseTest):
             )
         )
         self.assertEqual(respuesta.status_code, 404)
+
+
+# ---------------------------------------------------------------------------
+# Buscador histórico DDJJ
+# ---------------------------------------------------------------------------
+
+
+class HistorialDDJJTest(CRUDBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.froward = crear_calificacion(
+            ejercicio=2023,
+            instrumento='FROWARD',
+            descripcion='DIVIDENDO DE PRUEBA',
+            fecha_pago=date(2023, 5, 23),
+            secuencia_evento=100000391,
+            numero_dividendo=3,
+            rut_cliente='76555666-7',
+        )
+        self.froward.uri_documento.save(
+            'froward.pdf', ContentFile(PDF_VALIDO), save=True
+        )
+        self.sin_pdf = crear_calificacion(
+            ejercicio=2024,
+            instrumento='SINPDF',
+            descripcion='REGISTRO SIN CERTIFICADO',
+            fecha_pago=date(2024, 1, 10),
+            secuencia_evento=100000392,
+            numero_dividendo=0,
+            rut_cliente='76555666-7',
+        )
+
+    def url_historial(self):
+        return reverse('calificaciones:historial_ddjj')
+
+    def test_busqueda_por_rut_y_ejercicio_audita_consulta(self):
+        respuesta = self.client.get(
+            self.url_historial(),
+            {'rut_cliente': '76555666-7', 'ejercicio': '2023'},
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(respuesta.context['busqueda'])
+        self.assertEqual(respuesta.context['total'], 1)
+        self.assertContains(respuesta, 'FROWARD')
+        self.assertContains(respuesta, '76555666-7')
+        self.assertContains(respuesta, '23-05-2023')
+        self.assertContains(respuesta, '100000391')
+        self.assertContains(respuesta, 'Factor-08')
+        self.assertContains(respuesta, '0.00000000')
+        self.assertContains(
+            respuesta,
+            reverse(
+                'calificaciones:calificacion_pdf', args=[self.froward.pk]
+            ),
+        )
+        self.assertContains(respuesta, 'Descargar Certificado PDF')
+        self.assertNotContains(respuesta, 'SINPDF')
+
+        auditoria = RegistroAuditoria.objects.get(
+            accion=RegistroAuditoria.ACCION_CONSULTA_HISTORICA
+        )
+        self.assertEqual(auditoria.usuario, self.usuario)
+        self.assertIsNone(auditoria.calificacion_id_ref)
+        self.assertEqual(
+            auditoria.valor_nuevo['filtros']['rut_cliente'], '76555666-7'
+        )
+        self.assertEqual(
+            auditoria.valor_nuevo['filtros']['ejercicio'], '2023'
+        )
+        self.assertEqual(auditoria.valor_nuevo['resultados'], 1)
+        self.assertIn('1 resultado', auditoria.detalle)
+        self.assertIn('76555666-7', auditoria.detalle)
+
+    def test_busqueda_por_instrumento_muestra_sin_pdf(self):
+        respuesta = self.client.get(
+            self.url_historial(), {'instrumento': 'sinpdf'}
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.context['total'], 1)
+        self.assertContains(respuesta, 'SINPDF')
+        self.assertContains(respuesta, 'Sin PDF adjunto')
+        self.assertNotContains(respuesta, 'Descargar Certificado PDF')
+
+        auditoria = RegistroAuditoria.objects.get(
+            accion=RegistroAuditoria.ACCION_CONSULTA_HISTORICA
+        )
+        self.assertEqual(
+            auditoria.valor_nuevo['filtros']['instrumento'], 'sinpdf'
+        )
+
+    def test_sin_filtros_no_registra_auditoria(self):
+        respuesta = self.client.get(self.url_historial())
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertFalse(respuesta.context['busqueda'])
+        self.assertContains(
+            respuesta, 'Ingrese un RUT, un ejercicio y/o un instrumento'
+        )
+        self.assertFalse(
+            RegistroAuditoria.objects.filter(
+                accion=RegistroAuditoria.ACCION_CONSULTA_HISTORICA
+            ).exists()
+        )
+
+    def test_busqueda_sin_resultados_audita_cero(self):
+        respuesta = self.client.get(
+            self.url_historial(), {'rut_cliente': '99999999-9'}
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.context['total'], 0)
+        self.assertContains(
+            respuesta, 'No hay registros para los filtros ingresados'
+        )
+        auditoria = RegistroAuditoria.objects.get(
+            accion=RegistroAuditoria.ACCION_CONSULTA_HISTORICA
+        )
+        self.assertEqual(auditoria.valor_nuevo['resultados'], 0)
+
+    def test_auditor_puede_consultar_y_genera_evento(self):
+        auditor = Usuario.objects.create_user(
+            username='auditor_historial', password='clave-test'
+        )
+        auditor.groups.add(Group.objects.create(name=GRUPO_AUDITOR))
+        self.client.force_login(auditor)
+
+        respuesta = self.client.get(
+            self.url_historial(), {'rut_cliente': '76555666-7'}
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.context['total'], 2)
+        auditoria = RegistroAuditoria.objects.get(
+            accion=RegistroAuditoria.ACCION_CONSULTA_HISTORICA
+        )
+        self.assertEqual(auditoria.usuario, auditor)
+        self.assertEqual(auditoria.valor_nuevo['resultados'], 2)
+
+
+# ---------------------------------------------------------------------------
+# Vista de auditoría inmutable
+# ---------------------------------------------------------------------------
+
+
+class AuditoriaTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        grupos = {
+            nombre: Group.objects.create(name=nombre)
+            for nombre in (GRUPO_ADMIN, GRUPO_CORREDOR, GRUPO_AUDITOR)
+        }
+        cls.admin = Usuario.objects.create_superuser(
+            username='admin_nuam', password='Nuam2026*'
+        )
+        cls.corredor = Usuario.objects.create_user(
+            username='corredor1', password='Nuam2026*'
+        )
+        cls.corredor.groups.add(grupos[GRUPO_CORREDOR])
+        cls.auditor = Usuario.objects.create_user(
+            username='auditor1', password='Nuam2026*'
+        )
+        cls.auditor.groups.add(grupos[GRUPO_AUDITOR])
+
+        cls.registro_crear = RegistroAuditoria.objects.create(
+            usuario=cls.corredor,
+            accion=RegistroAuditoria.ACCION_CREAR,
+            calificacion_id_ref=101,
+            detalle='Creación de calificación de prueba.',
+            valor_nuevo={
+                'instrumento': 'NUEVO',
+                'factor_08': '0.50000000',
+            },
+        )
+        cls.registro_modificar = RegistroAuditoria.objects.create(
+            usuario=cls.corredor,
+            accion=RegistroAuditoria.ACCION_MODIFICAR,
+            calificacion_id_ref=101,
+            detalle='Modificación de calificación de prueba.',
+            valor_anterior={'instrumento': 'VIEJO'},
+            valor_nuevo={'instrumento': 'NUEVO'},
+        )
+        cls.registro_consulta = RegistroAuditoria.objects.create(
+            usuario=cls.auditor,
+            accion=RegistroAuditoria.ACCION_CONSULTA_HISTORICA,
+            calificacion_id_ref=None,
+            detalle='Consulta histórica DDJJ: 1 resultado(s).',
+            valor_nuevo={
+                'filtros': {'rut_cliente': '76555666-7'},
+                'resultados': 1,
+            },
+        )
+
+        RegistroAuditoria.objects.filter(
+            pk=cls.registro_crear.pk
+        ).update(
+            timestamp=datetime(2025, 1, 10, 9, 0, tzinfo=dt_timezone.utc)
+        )
+        RegistroAuditoria.objects.filter(
+            pk=cls.registro_modificar.pk
+        ).update(
+            timestamp=datetime(2025, 2, 15, 10, 30, tzinfo=dt_timezone.utc)
+        )
+        RegistroAuditoria.objects.filter(
+            pk=cls.registro_consulta.pk
+        ).update(
+            timestamp=datetime(2025, 3, 20, 11, 45, tzinfo=dt_timezone.utc)
+        )
+
+    def url_auditoria(self):
+        return reverse('calificaciones:auditoria')
+
+    def test_admin_accede_y_renderiza_json(self):
+        self.client.force_login(self.admin)
+        respuesta = self.client.get(self.url_auditoria())
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertContains(respuesta, 'Registro de auditoría')
+        self.assertContains(respuesta, 'Ver Cambios (JSON)')
+        self.assertContains(respuesta, 'CREAR')
+        self.assertContains(respuesta, 'MODIFICAR')
+        self.assertContains(respuesta, 'CARGA_MASIVA')
+        self.assertContains(respuesta, 'CONSULTA_HISTORICA')
+        self.assertContains(respuesta, '10-01-2025 09:00:00')
+        self.assertContains(respuesta, 'corredor1')
+        self.assertContains(respuesta, 'auditor1')
+        self.assertContains(respuesta, '&quot;instrumento&quot;: &quot;VIEJO&quot;')
+        self.assertContains(respuesta, '&quot;instrumento&quot;: &quot;NUEVO&quot;')
+        self.assertContains(respuesta, '&quot;factor_08&quot;: &quot;0.50000000&quot;')
+
+    def test_filtro_por_accion(self):
+        self.client.force_login(self.admin)
+        respuesta = self.client.get(
+            self.url_auditoria(), {'accion': 'MODIFICAR'}
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.context['total'], 1)
+        self.assertEqual(
+            [registro.accion for registro in respuesta.context['registros']],
+            ['MODIFICAR'],
+        )
+        self.assertContains(respuesta, 'Modificación de calificación')
+
+    def test_filtro_por_usuario(self):
+        self.client.force_login(self.admin)
+        respuesta = self.client.get(
+            self.url_auditoria(), {'usuario': 'auditor1'}
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.context['total'], 1)
+        self.assertEqual(
+            [registro.accion for registro in respuesta.context['registros']],
+            ['CONSULTA_HISTORICA'],
+        )
+
+    def test_filtro_por_rango_de_fechas(self):
+        self.client.force_login(self.admin)
+        respuesta = self.client.get(
+            self.url_auditoria(),
+            {'desde': '2025-02-01', 'hasta': '2025-02-28'},
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.context['total'], 1)
+        self.assertEqual(
+            [registro.accion for registro in respuesta.context['registros']],
+            ['MODIFICAR'],
+        )
+
+    def test_corredor_y_auditor_reciben_403(self):
+        for usuario in (self.corredor, self.auditor):
+            with self.subTest(usuario=usuario.username):
+                self.client.force_login(usuario)
+                respuesta = self.client.get(self.url_auditoria())
+                self.assertEqual(respuesta.status_code, 403)
+
+    def test_anonimo_redirige_al_login(self):
+        respuesta = self.client.get(self.url_auditoria())
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertIn(reverse('login'), respuesta['Location'])
+
 
