@@ -66,7 +66,7 @@ eliminarse.
 ### 1. Clonar el repositorio
 
 ```bash
-git clone <URL_DEL_REPOSITORIO>
+git clone https://github.com/axelCarrion/mantenedor-nuam.git
 cd mantenedor-nuam
 ```
 
